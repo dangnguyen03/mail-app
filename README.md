@@ -6,6 +6,14 @@ https://www.googleapis.com/auth/gmail.modify
 
 ---
 
+## 🚀 0. Pull Docker image (optional)
+
+Trước khi chạy ứng dụng, mình pull image:
+
+docker pull dangnguyenpy/mail-app:latest
+
+---
+
 ## 🚀 1. Truy cập OAuth Playground
 
 Mình truy cập:
@@ -93,12 +101,13 @@ fetch("https://gmail.googleapis.com/gmail/v1/users/me/messages", {
 
 ## 🎯 Tổng kết quy trình
 
-1. Truy cập OAuth Playground  
-2. Thêm scope gmail.modify  
-3. Authorize Google account  
-4. Exchange code lấy token  
-5. Copy access_token  
-6. Dán vào app để dùng Gmail API  
+1. Pull docker image  
+2. Truy cập OAuth Playground  
+3. Thêm scope gmail.modify  
+4. Authorize Google account  
+5. Exchange code lấy token  
+6. Copy access_token  
+7. Dán vào app để dùng Gmail API  
 
 ---
 
