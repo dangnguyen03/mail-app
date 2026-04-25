@@ -101,22 +101,22 @@ export function TemplateDialog({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="!max-w-6xl w-[70vw] max-h-[150vh] overflow-hidden flex flex-col">
+              <DialogHeader>
             <DialogTitle>{template ? 'Edit Template' : 'Create New Template'}</DialogTitle>
             <DialogDescription>
               Create an email template. Use {'{{name}}'} to insert recipient name.
             </DialogDescription>
           </DialogHeader>
 
-          <Tabs defaultValue="editor" className="w-full">
-            <TabsList>
+            <Tabs defaultValue="editor" className="w-full flex-1 overflow-hidden">
+              <TabsList>
               <TabsTrigger value="editor">Editor</TabsTrigger>
               <TabsTrigger value="preview">Preview</TabsTrigger>
             </TabsList>
 
-            <TabsContent value="editor" className="space-y-4">
-              {error && (
+              <TabsContent value="editor" className="space-y-4 overflow-y-auto max-h-[60vh] pr-2">
+                {error && (
                 <Alert variant="destructive">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription>{error}</AlertDescription>
@@ -142,15 +142,15 @@ export function TemplateDialog({
                   value={body}
                   onChange={(e) => setBody(e.target.value)}
                   rows={12}
-                  className="font-mono text-sm max-h-[300px] overflow-y-auto resize-none"
-                />
+                  className="w-full font-mono text-sm max-h-[300px] overflow-y-auto resize-none"
+                  />
                 <p className="text-xs text-muted-foreground mt-1">
                   Supports basic formatting. Use {'{{name}}'} for personalization.
                 </p>
               </div>
             </TabsContent>
 
-            <TabsContent value="preview" className="space-y-4">
+            {/* <TabsContent value="preview" className="space-y-4">
               <div className="bg-muted p-4 rounded-lg space-y-4">
                 <div>
                   <p className="text-xs font-medium text-muted-foreground mb-2">
@@ -170,11 +170,36 @@ export function TemplateDialog({
                   </div>
                 </div>
               </div>
+            </TabsContent> */}
+
+            <TabsContent
+              value="preview"
+              className="space-y-4 overflow-y-auto flex-1 pr-2"
+            >
+              <div className="bg-muted p-4 rounded-lg space-y-4">
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground mb-2">
+                    PREVIEW (with name = John Doe)
+                  </p>
+                    <div className="bg-background p-3 rounded border max-h-[470px] overflow-y-auto overflow-x-hidden break-words">
+                      <p className="font-medium mb-3">
+                      Subject:{' '}
+                      {subject.replace(/{{name}}/g, 'John Doe') || '(empty)'}
+                    </p>
+                    <div
+                      className="prose prose-sm dark:prose-invert max-w-none"
+                      dangerouslySetInnerHTML={{
+                        __html: body.replace(/{{name}}/g, 'John Doe') || '(empty)',
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
             </TabsContent>
           </Tabs>
 
-          <DialogFooter className="flex gap-2">
-            {template && onDelete && (
+            <DialogFooter className="flex gap-2 shrink-0">
+              {template && onDelete && (
               <Button
                 variant="destructive"
                 onClick={handleDelete}
