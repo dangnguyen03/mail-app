@@ -21,6 +21,40 @@ interface TokenDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
 }
+function CopyCode({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  return (
+    <code
+      onClick={handleCopy}
+      className="
+        cursor-pointer
+        bg-muted
+        px-1.5 py-0.5
+        rounded
+        text-xs
+        break-all
+        inline-block
+        max-w-full
+        hover:bg-muted/80
+        transition
+      "
+      title="Click to copy"
+    >
+      {copied ? "Copied!" : text}
+    </code>
+  )
+}
 
 export function TokenDialog({ isOpen, onOpenChange }: TokenDialogProps) {
   const { token, setToken, clearToken } = useToken()
@@ -79,12 +113,12 @@ export function TokenDialog({ isOpen, onOpenChange }: TokenDialogProps) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="flex gap-2">
-            <AlertDialogCancel onClick={() => setShowClear(false)}>
+            <AlertDialogCancel className='cursor-pointer' onClick={() => setShowClear(false)}>
               Keep Token
             </AlertDialogCancel>
             <AlertDialogAction
               onClick={handleClearToken}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 text-white cursor-pointer"
             >
               Clear Token
             </AlertDialogAction>
@@ -159,7 +193,7 @@ export function TokenDialog({ isOpen, onOpenChange }: TokenDialogProps) {
             <Button
               onClick={() => setShowClear(true)}
               variant="destructive"
-              className="w-full"
+              className="w-full cursor-pointer"
             >
               Clear Token
             </Button>
@@ -172,7 +206,10 @@ export function TokenDialog({ isOpen, onOpenChange }: TokenDialogProps) {
               <AlertDescription>
                 <ol className="list-decimal list-inside space-y-1 mt-2 text-sm">
                   <li>Visit <a href="https://developers.google.com/oauthplayground/?" target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">OAuth 2.0 Playground</a></li>
-                  <li>Find "https://www.googleapis.com/auth/gmail.modify"</li>
+                  <li>
+                    Find{" "}
+                    <CopyCode text="https://www.googleapis.com/auth/gmail.modify" />
+                  </li>
                   <li>Click "Authorize APIs" to get a token</li>
                   <li>Paste the access token below</li>
                 </ol>
