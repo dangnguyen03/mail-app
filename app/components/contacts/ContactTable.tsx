@@ -166,7 +166,7 @@ export function ContactTable({
                         variant="outline"
                         size="sm"
                         onClick={() => onViewReply(contact.id)}
-                        className="gap-2"
+                        className="gap-2 cursor-pointer"
                       >
                         <Mail className="w-4 h-4" />
                         View Reply

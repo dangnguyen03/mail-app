@@ -12,9 +12,19 @@ import { DashboardStats } from './components/dashboard/DashboardStats'
 import { PollingStatus } from './components/dashboard/PollingStatus'
 import { GettingStarted } from './components/dashboard/GettingStarted'
 import { ContactTable } from './components/contacts/ContactTable'
-import { useContacts } from './hooks/useContacts' // This now correctly points to the updated hook
-import { useTemplates } from './hooks/useTemplates' // Assuming this hook exists
+import { useContacts } from './hooks/useContacts'
+import { useTemplates } from './hooks/useTemplates'
 import { Button } from '@/components/ui/button'
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog'
 import { LogOut, Plus, Upload, Send, Trash2 } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { EmailTemplate } from '@/lib/types'
@@ -24,6 +34,7 @@ export default function Page() {
   const { contacts, isLoading: contactsLoading, removeContact, bulkCreateContacts, updateContactStatus, incrementResendCount, clearAllContacts } = useContacts()
   const { templates, isLoading: templatesLoading, createTemplate, updateTemplateContent, removeTemplate } = useTemplates()
   const { toast } = useToast()
+
   const [showTokenDialog, setShowTokenDialog] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
   const [showTemplateDialog, setShowTemplateDialog] = useState(false)
@@ -33,15 +44,22 @@ export default function Page() {
   const [selectedContactForResend, setSelectedContactForResend] = useState<string | null>(null)
   const [selectedContactForPreview, setSelectedContactForPreview] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'all' | 'replied' | 'not-replied'>('all')
-
-  // FIX: thêm state track template đang edit, null = tạo mới
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null)
 
-  const handleDelete = async (id: string) => {
-    if (confirm('Are you sure? This action cannot be undone.')) {
-      await removeContact(id)
-      toast({ title: 'Contact deleted' })
-    }
+  // AlertDialog states
+  const [deleteContactId, setDeleteContactId] = useState<string | null>(null)
+  const [showClearAllConfirm, setShowClearAllConfirm] = useState(false)
+
+  // ── Contact handlers ──
+  const handleDelete = (id: string) => {
+    setDeleteContactId(id)
+  }
+
+  const handleDeleteConfirmed = async () => {
+    if (!deleteContactId) return
+    await removeContact(deleteContactId)
+    toast({ title: 'Contact deleted' })
+    setDeleteContactId(null)
   }
 
   const handleSend = (id: string) => {
@@ -68,26 +86,27 @@ export default function Page() {
     }
   }
 
-  const handleClearAllContacts = async () => {
-    if (confirm('Are you sure you want to delete all contacts? This action cannot be undone.')) {
-      await clearAllContacts()
-      toast({ title: 'All contacts deleted' })
-    }
+  const handleClearAllContacts = () => {
+    setShowClearAllConfirm(true)
   }
 
-  // FIX: mở dialog tạo mới — reset editingTemplate về null
+  const handleClearAllConfirmed = async () => {
+    await clearAllContacts()
+    toast({ title: 'All contacts deleted' })
+    setShowClearAllConfirm(false)
+  }
+
+  // ── Template handlers ──
   const handleOpenNewTemplate = () => {
     setEditingTemplate(null)
     setShowTemplateDialog(true)
   }
 
-  // FIX: mở dialog edit — set template cần edit
   const handleOpenEditTemplate = (template: EmailTemplate) => {
     setEditingTemplate(template)
     setShowTemplateDialog(true)
   }
 
-  // FIX: onSave tự biết create hay update dựa vào editingTemplate
   const handleSaveTemplate = async (subject: string, body: string) => {
     try {
       if (editingTemplate) {
@@ -102,7 +121,6 @@ export default function Page() {
     }
   }
 
-  // FIX: delete template từ dialog edit
   const handleDeleteTemplate = async () => {
     if (!editingTemplate) return
     try {
@@ -157,9 +175,7 @@ export default function Page() {
             <p className="text-muted-foreground">
               Add your Gmail access token to get started
             </p>
-            <Button onClick={() => setShowTokenDialog(true)}>
-              Add Token
-            </Button>
+            <Button onClick={() => setShowTokenDialog(true)}>Add Token</Button>
           </div>
         </div>
       </>
@@ -171,6 +187,8 @@ export default function Page() {
     if (activeTab === 'not-replied') return contact.status === 'sent'
     return true
   })
+
+  const deletingContact = contacts.find((c) => c.id === deleteContactId)
 
   return (
     <div className="min-h-screen bg-background">
@@ -207,26 +225,24 @@ export default function Page() {
             <PollingStatus contacts={contacts} token={token} onReplyDetected={handleReplyDetected} />
 
             <div className="flex flex-wrap gap-3">
-              <Button size="lg" variant="outline" className="gap-2" onClick={() => setShowImportDialog(true)}>
+              <Button size="lg" variant="outline" className="gap-2 cursor-pointer" onClick={() => setShowImportDialog(true)}>
                 <Upload className="w-4 h-4" />
                 Import Contacts
               </Button>
-              <Button size="lg" variant="destructive" className="gap-2" onClick={handleClearAllContacts} disabled={contacts.length === 0}>
+              <Button size="lg" variant="destructive" className="gap-2 cursor-pointer" onClick={handleClearAllContacts} disabled={contacts.length === 0}>
                 <Trash2 className="w-4 h-4" />
                 Clear All Contacts
               </Button>
-              {/* FIX: dùng handleOpenNewTemplate thay vì setShowTemplateDialog(true) */}
-              <Button size="lg" variant="outline" className="gap-2" onClick={handleOpenNewTemplate}>
+              <Button size="lg" variant="outline" className="gap-2 cursor-pointer" onClick={handleOpenNewTemplate}>
                 <Plus className="w-4 h-4" />
                 New Template
               </Button>
-              <Button size="lg" className="gap-2" disabled={contacts.length === 0 || templates.length === 0} onClick={() => setShowSendDialog(true)}>
+              <Button size="lg" className="gap-2 cursor-pointer" disabled={contacts.length === 0 || templates.length === 0} onClick={() => setShowSendDialog(true)}>
                 <Send className="w-4 h-4" />
                 Send Email
               </Button>
             </div>
 
-            {/* FIX: hiện danh sách template để click edit */}
             {templates.length > 0 && (
               <div className="space-y-2">
                 <p className="text-sm font-medium text-muted-foreground">Templates</p>
@@ -237,6 +253,7 @@ export default function Page() {
                       variant="outline"
                       size="sm"
                       onClick={() => handleOpenEditTemplate(t)}
+                      className="cursor-pointer"
                     >
                       {t.subject}
                     </Button>
@@ -248,36 +265,29 @@ export default function Page() {
             <div className="space-y-6">
               <div className="border-b">
                 <div className="flex gap-4 overflow-x-auto">
-                  <button
-                    onClick={() => setActiveTab('all')}
-                    className={`pb-2 px-1 font-medium text-sm border-b-2 transition whitespace-nowrap ${
-                      activeTab === 'all'
-                        ? 'border-primary text-primary'
-                        : 'border-transparent text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    All ({contacts.length})
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('replied')}
-                    className={`pb-2 px-1 font-medium text-sm border-b-2 transition whitespace-nowrap ${
-                      activeTab === 'replied'
-                        ? 'border-primary text-primary'
-                        : 'border-transparent text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    Replied ({contacts.filter((c) => c.status === 'replied').length})
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('not-replied')}
-                    className={`pb-2 px-1 font-medium text-sm border-b-2 transition whitespace-nowrap ${
-                      activeTab === 'not-replied'
-                        ? 'border-primary text-primary'
-                        : 'border-transparent text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    Not Replied ({contacts.filter((c) => c.status === 'sent').length})
-                  </button>
+                  {(['all', 'replied', 'not-replied'] as const).map((tab) => {
+                    const count =
+                      tab === 'all'
+                        ? contacts.length
+                        : tab === 'replied'
+                        ? contacts.filter((c) => c.status === 'replied').length
+                        : contacts.filter((c) => c.status === 'sent').length
+                    const label =
+                      tab === 'all' ? 'All' : tab === 'replied' ? 'Replied' : 'Not Replied'
+                    return (
+                      <button
+                        key={tab}
+                        onClick={() => setActiveTab(tab)}
+                        className={`pb-2 px-1 font-medium text-sm border-b-2 transition whitespace-nowrap ${
+                          activeTab === tab
+                            ? 'border-primary text-primary'
+                            : 'border-transparent text-muted-foreground hover:text-foreground'
+                        }`}
+                      >
+                        {label} ({count})
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
 
@@ -301,13 +311,13 @@ export default function Page() {
         </div>
       </main>
 
+      {/* ── Dialogs ── */}
       <TokenDialog isOpen={showTokenDialog} onOpenChange={setShowTokenDialog} />
       <ImportDialog
         isOpen={showImportDialog}
         onOpenChange={setShowImportDialog}
         onImport={handleImport}
       />
-      {/* FIX: truyền template (null = new, object = edit) — bỏ isNew */}
       <TemplateDialog
         isOpen={showTemplateDialog}
         onOpenChange={setShowTemplateDialog}
@@ -315,6 +325,7 @@ export default function Page() {
         onSave={handleSaveTemplate}
         onDelete={editingTemplate ? handleDeleteTemplate : undefined}
       />
+
       {token && (
         <>
           <SendDialog
@@ -345,6 +356,56 @@ export default function Page() {
           )}
         </>
       )}
+
+      {/* ── AlertDialog: xoá 1 contact ── */}
+      <AlertDialog open={!!deleteContactId} onOpenChange={(open) => !open && setDeleteContactId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this contact?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone.{' '}
+              {deletingContact && (
+                <span className="font-medium text-foreground">
+                  {deletingContact.name} ({deletingContact.email})
+                </span>
+              )}{' '}
+              will be permanently removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteContactId(null)} className='cursor-pointer'>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteConfirmed}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 text-white cursor-pointer"
+            >
+              Delete contact
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── AlertDialog: xoá tất cả contacts ── */}
+      <AlertDialog open={showClearAllConfirm} onOpenChange={setShowClearAllConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete all contacts?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. All{' '}
+              <span className="font-medium text-foreground">{contacts.length} contacts</span>{' '}
+              will be permanently deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className='cursor-pointer'>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleClearAllConfirmed}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer text-white"
+            >
+              Delete all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

@@ -86,7 +86,7 @@ export function PollingStatus({
             onClick={handleTogglePolling}
             disabled={sentContacts.length === 0 || !token}
             variant={isEnabled ? 'destructive' : 'default'}
-            className="w-full gap-2"
+            className="w-full gap-2 cursor-pointer"
           >
             <Zap className="w-4 h-4" />
             {isEnabled ? 'Stop Polling' : 'Start Polling'}
