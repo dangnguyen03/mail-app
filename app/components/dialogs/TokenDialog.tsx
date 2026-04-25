@@ -171,7 +171,7 @@ export function TokenDialog({ isOpen, onOpenChange }: TokenDialogProps) {
               <AlertTitle>How to Get Your Token</AlertTitle>
               <AlertDescription>
                 <ol className="list-decimal list-inside space-y-1 mt-2 text-sm">
-                  <li>Visit <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">Google Account Permissions</a></li>
+                  <li>Visit <a href="https://developers.google.com/oauthplayground/?" target="_blank" rel="noopener noreferrer" className="underline hover:no-underline">Google Account Permissions</a></li>
                   <li>Find "https://www.googleapis.com/auth/gmail.modify"</li>
                   <li>Click "Authorize APIs" to get a token</li>
                   <li>Paste the access token below</li>
