@@ -243,8 +243,8 @@ export function SendDialog({
                 value={delay}
                 onValueChange={setDelay}
                 min={1000}
-                max={60000}
-                step={100}
+                max={180000}
+                step={500}
               />
               <p className="text-xs text-muted-foreground mt-1">
                 {delay[0]}ms = {(delay[0] / 1000).toFixed(1)}s mỗi email
