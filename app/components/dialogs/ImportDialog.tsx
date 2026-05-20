@@ -21,6 +21,13 @@ import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle, Upload, CheckCircle2 } from 'lucide-react'
 
+const AUTO_NAME_COLUMN = '__auto_name__'
+
+interface ContactImportCandidate {
+  email: string
+  name: string
+}
+
 interface ImportDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
@@ -30,6 +37,51 @@ interface ImportDialogProps {
 interface ParsedData {
   columns: string[]
   rows: any[]
+}
+
+function normalizeCell(value: unknown): string {
+  return value?.toString().trim() ?? ''
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+function getFallbackName(email: string): string {
+  return email.split('@')[0]?.trim() || email
+}
+
+function buildContacts(
+  parsedData: ParsedData,
+  emailColumn: string,
+  nameColumn: string
+): { contacts: ContactImportCandidate[]; skippedCount: number } {
+  const emailIdx = parsedData.columns.indexOf(emailColumn)
+  const nameIdx =
+    nameColumn && nameColumn !== AUTO_NAME_COLUMN
+      ? parsedData.columns.indexOf(nameColumn)
+      : -1
+
+  const contacts = parsedData.rows
+    .map((row: any[]) => {
+      const email = normalizeCell(row[emailIdx]).toLowerCase()
+      const rawName = nameIdx >= 0 ? normalizeCell(row[nameIdx]) : ''
+
+      if (!isValidEmail(email)) {
+        return null
+      }
+
+      return {
+        email,
+        name: rawName || getFallbackName(email),
+      }
+    })
+    .filter((contact): contact is ContactImportCandidate => contact !== null)
+
+  return {
+    contacts,
+    skippedCount: parsedData.rows.length - contacts.length,
+  }
 }
 
 export function ImportDialog({
@@ -64,7 +116,11 @@ export function ImportDialog({
       const arrayBuffer = await selectedFile.arrayBuffer()
       const workbook = read(arrayBuffer, { type: 'array' })
       const worksheet = workbook.Sheets[workbook.SheetNames[0]]
-      const data = utils.sheet_to_json(worksheet, { header: 1 })
+      const data = utils.sheet_to_json(worksheet, {
+        header: 1,
+        defval: '',
+        blankrows: false,
+      })
 
       if (data.length < 2) {
         setError('File must contain at least 2 rows (header + 1 data row)')
@@ -84,15 +140,19 @@ export function ImportDialog({
         h?.toString().toLowerCase().includes('name')
       )
       if (emailIdx >= 0) setEmailColumn(headers[emailIdx])
-      if (nameIdx >= 0) setNameColumn(headers[nameIdx])
+      if (nameIdx >= 0) {
+        setNameColumn(headers[nameIdx])
+      } else {
+        setNameColumn(AUTO_NAME_COLUMN)
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to parse file')
     }
   }
 
   const handleMappingSubmit = async () => {
-    if (!emailColumn || !nameColumn) {
-      setError('Please select both email and name columns')
+    if (!emailColumn) {
+      setError('Please select an email column')
       return
     }
 
@@ -101,15 +161,7 @@ export function ImportDialog({
       return
     }
 
-    const emailIdx = parsedData.columns.indexOf(emailColumn)
-    const nameIdx = parsedData.columns.indexOf(nameColumn)
-
-    const contacts = parsedData.rows
-      .map((row: any[]) => ({
-        email: row[emailIdx]?.toString().trim(),
-        name: row[nameIdx]?.toString().trim(),
-      }))
-      .filter((c) => c.email && c.name && c.email.includes('@'))
+    const { contacts } = buildContacts(parsedData, emailColumn, nameColumn)
 
     if (contacts.length === 0) {
       setError('No valid contacts found after filtering')
@@ -122,15 +174,7 @@ export function ImportDialog({
   const handleImportSubmit = async () => {
     if (!parsedData) return
 
-    const emailIdx = parsedData.columns.indexOf(emailColumn)
-    const nameIdx = parsedData.columns.indexOf(nameColumn)
-
-    const contacts = parsedData.rows
-      .map((row: any[]) => ({
-        email: row[emailIdx]?.toString().trim(),
-        name: row[nameIdx]?.toString().trim(),
-      }))
-      .filter((c) => c.email && c.name && c.email.includes('@'))
+    const { contacts } = buildContacts(parsedData, emailColumn, nameColumn)
 
     setIsImporting(true)
     try {
@@ -153,30 +197,19 @@ export function ImportDialog({
   const getPreviewContacts = (): Array<{ email: string; name: string }> => {
     if (!parsedData) return []
 
-    const emailIdx = parsedData.columns.indexOf(emailColumn)
-    const nameIdx = parsedData.columns.indexOf(nameColumn)
-
-    return parsedData.rows
-      .slice(0, 5)
-      .map((row: any[]) => ({
-        email: row[emailIdx]?.toString().trim() || '',
-        name: row[nameIdx]?.toString().trim() || '',
-      }))
-      .filter((c) => c.email && c.name && c.email.includes('@'))
+    return buildContacts(parsedData, emailColumn, nameColumn).contacts.slice(0, 5)
   }
 
   const getValidContactsCount = (): number => {
     if (!parsedData) return 0
 
-    const emailIdx = parsedData.columns.indexOf(emailColumn)
-    const nameIdx = parsedData.columns.indexOf(nameColumn)
+    return buildContacts(parsedData, emailColumn, nameColumn).contacts.length
+  }
 
-    return parsedData.rows
-      .filter((row: any[]) => {
-        const email = row[emailIdx]?.toString().trim()
-        const name = row[nameIdx]?.toString().trim()
-        return email && name && email.includes('@')
-      }).length
+  const getSkippedContactsCount = (): number => {
+    if (!parsedData) return 0
+
+    return buildContacts(parsedData, emailColumn, nameColumn).skippedCount
   }
 
   return (
@@ -250,9 +283,12 @@ export function ImportDialog({
               </label>
               <Select value={nameColumn} onValueChange={setNameColumn}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Select name column" />
+                  <SelectValue placeholder="Use email as fallback name" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={AUTO_NAME_COLUMN}>
+                    Use email as fallback name
+                  </SelectItem>
                   {parsedData.columns.map((col, i) => (
                     <SelectItem key={i} value={col}>
                       {col}
@@ -268,6 +304,11 @@ export function ImportDialog({
           <div className="space-y-4">
             <div className="bg-muted p-4 rounded-lg">
               <p className="text-sm font-medium mb-2">Found {getValidContactsCount()} valid contacts</p>
+              {getSkippedContactsCount() > 0 && (
+                <p className="text-xs text-muted-foreground mb-3">
+                  Skipped {getSkippedContactsCount()} rows because the email was empty or invalid.
+                </p>
+              )}
               <div className="space-y-2">
                 {getPreviewContacts().map((contact, i) => (
                   <div key={i} className="text-sm">

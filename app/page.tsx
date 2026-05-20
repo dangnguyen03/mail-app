@@ -79,8 +79,16 @@ export default function Page() {
 
   const handleImport = async (contactsData: Array<{ email: string; name: string }>) => {
     try {
-      await bulkCreateContacts(contactsData)
-      toast({ title: 'Success', description: `Imported ${contactsData.length} contacts` })
+      const result = await bulkCreateContacts(contactsData)
+      const skippedCount = result.duplicateCount + result.invalidCount
+
+      toast({
+        title: 'Success',
+        description:
+          skippedCount > 0
+            ? `Imported ${result.created.length} contacts. Skipped ${skippedCount} invalid or duplicate rows.`
+            : `Imported ${result.created.length} contacts`,
+      })
     } catch (err) {
       toast({ title: 'Error', description: 'Failed to import contacts', variant: 'destructive' })
     }

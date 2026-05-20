@@ -14,6 +14,24 @@ import {
 } from '@/lib/indexeddb'
 import { v4 as uuidv4 } from 'uuid'
 
+export interface BulkCreateContactsResult {
+  created: Contact[]
+  duplicateCount: number
+  invalidCount: number
+}
+
+function normalizeEmail(email: string): string {
+  return email.trim().toLowerCase()
+}
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+}
+
+function getFallbackName(email: string): string {
+  return email.split('@')[0]?.trim() || email
+}
+
 export function useContacts() {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -85,23 +103,48 @@ export function useContacts() {
   }, [])
 
   const bulkCreateContacts = useCallback(
-    async (data: Array<{ email: string; name: string }>): Promise<Contact[]> => {
+    async (data: Array<{ email: string; name: string }>): Promise<BulkCreateContactsResult> => {
       try {
+        const existingContacts = await getAllContacts()
+        const existingEmails = new Set(
+          existingContacts.map((contact) => normalizeEmail(contact.email))
+        )
         const newContacts: Contact[] = []
+        let duplicateCount = 0
+        let invalidCount = 0
+
         for (const item of data) {
+          const email = normalizeEmail(item.email)
+          const name = item.name.trim() || getFallbackName(email)
+
+          if (!isValidEmail(email)) {
+            invalidCount += 1
+            continue
+          }
+
+          if (existingEmails.has(email)) {
+            duplicateCount += 1
+            continue
+          }
+
           const contact: Contact = {
             id: uuidv4(),
-            email: item.email,
-            name: item.name,
+            email,
+            name,
             status: 'pending' as ContactStatus,
             resendCount: 0,
             createdAt: Date.now(),
           }
           await addContact(contact)
+          existingEmails.add(email)
           newContacts.push(contact)
         }
         setContacts((prev) => [...prev, ...newContacts])
-        return newContacts
+        return {
+          created: newContacts,
+          duplicateCount,
+          invalidCount,
+        }
       } catch (err) {
         const error = err instanceof Error ? err : new Error('Unknown error')
         setError(error)
