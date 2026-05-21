@@ -128,6 +128,7 @@ export function SendDialog({
           to: contact.email,
           subject,
           body,
+          bodyType: template.bodyType ?? 'html',
         })
 
         setSendLogs((prev) =>
@@ -187,16 +188,16 @@ export function SendDialog({
       <DialogContent className="max-w-2xl">
         <DialogHeader>
           <DialogTitle>
-            {isDone ? 'Kết quả gửi email' : 'Gửi Email Hàng Loạt'}
+            {isDone ? 'Result send mail' : 'Send emails to contacts'}
           </DialogTitle>
           <DialogDescription>
             {isDone
-              ? `Đã hoàn tất — ${successCount}/${contacts.length} email gửi thành công`
-              : 'Gửi email hàng loạt đến danh sách liên hệ với độ trễ tuỳ chỉnh'}
+              ? `Completed — ${successCount}/${contacts.length} emails sent successfully`
+              : 'Send bulk emails to contacts with customizable delay'}
           </DialogDescription>
         </DialogHeader>
 
-        {/* ── BƯỚC 1: Cấu hình ── */}
+        {/* ── STEP 1: Configuration ── */}
         {!isSending && !isDone && (
           <div className="space-y-4">
             {error && (
@@ -223,21 +224,48 @@ export function SendDialog({
             </div>
 
             {selectedTemplate && (
+              // <div className="bg-muted p-3 rounded-lg text-sm">
+              //   <p className="font-medium mb-2">Preview:</p>
+              //   <p className="font-semibold mb-2">{selectedTemplate.subject}</p>
+              //   {selectedTemplate.bodyType === 'text' ? (
+              //     <pre className="font-sans text-xs whitespace-pre-wrap overflow-hidden h-24">
+              //       {selectedTemplate.body.replace(/{{name}}/g, 'Nguyễn Văn A')}
+              //     </pre>
+              //   ) : (
+              //     <div
+              //       className="prose prose-sm dark:prose-invert max-w-none overflow-hidden text-ellipsis h-24"
+              //       dangerouslySetInnerHTML={{
+              //         __html: selectedTemplate.body.replace(/{{name}}/g, 'Nguyễn Văn A'),
+              //       }}
+              //     />
+              //   )}
+              // </div>
+
               <div className="bg-muted p-3 rounded-lg text-sm">
-                <p className="font-medium mb-2">Xem trước:</p>
-                <p className="font-semibold mb-2">{selectedTemplate.subject}</p>
-                <div
-                  className="prose prose-sm dark:prose-invert max-w-none overflow-hidden text-ellipsis h-24"
-                  dangerouslySetInnerHTML={{
-                    __html: selectedTemplate.body.replace(/{{name}}/g, 'Nguyễn Văn A'),
-                  }}
-                />
+                <p className="font-medium mb-2">Preview:</p>
+
+                <p className="font-semibold mb-2">
+                  {selectedTemplate.subject}
+                </p>
+
+                {selectedTemplate.bodyType === 'text' ? (
+                  <pre className="font-sans text-xs whitespace-pre-wrap overflow-y-auto h-30 border rounded-md p-2 bg-background">
+                    {selectedTemplate.body.replace(/{{name}}/g, 'Nguyễn Văn A')}
+                  </pre>
+                ) : (
+                  <div
+                    className="prose prose-sm dark:prose-invert max-w-none overflow-y-auto h-30 border rounded-md p-2 bg-background"
+                    dangerouslySetInnerHTML={{
+                      __html: selectedTemplate.body.replace(/{{name}}/g, 'Nguyễn Văn A'),
+                    }}
+                  />
+                )}
               </div>
             )}
 
             <div>
               <label className="text-sm font-medium block mb-4">
-                Độ trễ giữa các email: {delay[0]}ms
+                Delay: {delay[0]}ms
               </label>
               <Slider
                 value={delay}
@@ -254,8 +282,8 @@ export function SendDialog({
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                Sẽ gửi đến {contacts.length} liên hệ • Thời gian ước tính:{' '}
-                {((contacts.length * delay[0]) / 1000 / 60).toFixed(1)} phút
+                Will send to {contacts.length} contacts • Estimated time:{' '}
+                {((contacts.length * delay[0]) / 1000 / 60).toFixed(1)} minutes
               </AlertDescription>
             </Alert>
           </div>
@@ -374,13 +402,13 @@ export function SendDialog({
           {!isSending && !isDone && (
             <>
               <Button variant="outline" onClick={() => onOpenChange(false)}>
-                Huỷ
+                Cancel
               </Button>
               <Button
                 onClick={handleStartSend}
                 disabled={!selectedTemplateId || contacts.length === 0}
               >
-                Gửi đến {contacts.length} liên hệ
+                Send to {contacts.length} contacts
               </Button>
             </>
           )}

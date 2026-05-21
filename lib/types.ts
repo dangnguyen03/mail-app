@@ -16,6 +16,7 @@ export interface EmailTemplate {
   id: string
   subject: string
   body: string
+  bodyType?: 'html' | 'text'
   createdAt: number
 }
 
@@ -65,6 +66,7 @@ export interface SendEmailRequest {
   to: string
   subject: string
   body: string
+  bodyType?: 'html' | 'text'
   threadId?: string
 }
 

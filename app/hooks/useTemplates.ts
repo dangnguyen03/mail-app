@@ -34,12 +34,13 @@ export function useTemplates() {
   }, [])
 
   const createTemplate = useCallback(
-    async (subject: string, body: string): Promise<EmailTemplate> => {
+    async (subject: string, body: string, bodyType: 'html' | 'text' = 'html'): Promise<EmailTemplate> => {
       try {
         const template: EmailTemplate = {
           id: uuidv4(),
           subject,
           body,
+          bodyType,
           createdAt: Date.now(),
         }
         await addTemplate(template)
@@ -55,12 +56,13 @@ export function useTemplates() {
   )
 
   const updateTemplateContent = useCallback(
-    async (id: string, subject: string, body: string): Promise<EmailTemplate> => {
+    async (id: string, subject: string, body: string, bodyType: 'html' | 'text' = 'html'): Promise<EmailTemplate> => {
       try {
         const template: EmailTemplate = {
           id,
           subject,
           body,
+          bodyType,
           createdAt: templates.find((t) => t.id === id)?.createdAt || Date.now(),
         }
         await updateTemplate(template)
@@ -94,13 +96,14 @@ export function useTemplates() {
   }, [templates])
 
   const interpolateTemplate = useCallback(
-    (templateId: string, name: string): { subject: string; body: string } | null => {
+    (templateId: string, name: string): { subject: string; body: string; bodyType: 'html' | 'text' } | null => {
       const template = templates.find((t) => t.id === templateId)
       if (!template) return null
 
       return {
         subject: template.subject.replace(/{{name}}/g, name),
         body: template.body.replace(/{{name}}/g, name),
+        bodyType: template.bodyType ?? 'html',
       }
     },
     [templates]

@@ -115,13 +115,13 @@ export default function Page() {
     setShowTemplateDialog(true)
   }
 
-  const handleSaveTemplate = async (subject: string, body: string) => {
+  const handleSaveTemplate = async (subject: string, body: string, bodyType: 'html' | 'text' = 'html') => {
     try {
       if (editingTemplate) {
-        await updateTemplateContent(editingTemplate.id, subject, body)
+        await updateTemplateContent(editingTemplate.id, subject, body, bodyType)
         toast({ title: 'Template updated' })
       } else {
-        await createTemplate(subject, body)
+        await createTemplate(subject, body, bodyType)
         toast({ title: 'Template created' })
       }
     } catch (err) {

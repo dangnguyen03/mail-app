@@ -16,12 +16,13 @@ export class GmailService {
     }
   }
 
-  private encodeEmail(to: string, subject: string, body: string, inReplyTo?: string): string {
+  private encodeEmail(to: string, subject: string, body: string, bodyType: 'html' | 'text' = 'html', inReplyTo?: string): string {
+    const contentType = bodyType === 'text' ? 'text/plain' : 'text/html'
     const headers: string[] = [
       `To: ${to}`,
       `Subject: ${subject}`,
-      'MIME-Version: 1.0', // Ensure MIME version is set
-      'Content-Type: text/html; charset="UTF-8"', // Set content type to HTML
+      'MIME-Version: 1.0',
+      `Content-Type: ${contentType}; charset="UTF-8"`,
     ]
 
     if (inReplyTo) {
@@ -55,6 +56,7 @@ export class GmailService {
         request.to,
         request.subject,
         request.body,
+        request.bodyType ?? 'html',
         inReplyTo
       )
 
