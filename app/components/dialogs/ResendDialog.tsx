@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Contact, EmailTemplate } from '@/lib/types'
 import { GmailService } from '@/lib/gmail'
+import { useToken } from '@/app/components/provider/TokenProvider'
 import {
   Dialog,
   DialogContent,
@@ -43,6 +44,7 @@ export function ResendDialog({
   mode = 'resend',
   onResendSuccess,
 }: ResendDialogProps) {
+  const { refreshToken } = useToken()
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [isSending, setIsSending] = useState(false)
@@ -166,7 +168,9 @@ export function ResendDialog({
     setError(null)
 
     try {
-      if (!gmail) throw new Error('Gmail service not available.')
+      // Fetch a fresh token before sending (auto-refreshes if expired)
+      const freshToken = (await refreshToken()) ?? token
+      const gmail = new GmailService(freshToken!)
 
       const templateSubject = template.subject.replace(/{{name}}/g, contact.name)
       const body = template.body.replace(/{{name}}/g, contact.name)

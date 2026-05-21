@@ -118,3 +118,28 @@ Sau khi hoàn tất, mình có thể:
 - Gửi email qua Gmail API  
 - Đọc / sửa / quản lý email  
 - Tracking email trong hệ thống
+
+
+
+
+Bạn lấy ở Google Cloud Console.
+
+Các bước ngắn gọn:
+
+Mở https://console.cloud.google.com/
+Tạo hoặc chọn một project.
+Vào APIs & Services → OAuth consent screen.
+Cấu hình consent screen:
+Chọn External
+Điền app name, email
+Thêm email của bạn vào Test users
+Vào APIs & Services → Credentials.
+Chọn Create Credentials → OAuth client ID.
+Chọn loại Web application.
+Thêm:
+Authorized JavaScript origins: http://localhost:3000
+Authorized redirect URIs: http://localhost:3000/api/auth/callback/google
+Tạo xong, Google sẽ trả:
+Client ID
+Client Secret
+Điền vào .env.local:

@@ -1,100 +1,62 @@
-// 'use client'
-
-// import React, { createContext, useContext, useState, useEffect } from 'react'
-// import { getToken, saveToken, clearToken } from '@/lib/storage'
-
-// interface TokenContextType {
-//   token: string | null
-//   setToken: (token: string) => void
-//   clearToken: () => void
-//   isLoading: boolean
-// }
-
-// const TokenContext = createContext<TokenContextType | undefined>(undefined)
-
-// export function TokenProvider({ children }: { children: React.ReactNode }) {
-//   const [token, setTokenState] = useState<string | null>(null)
-//   const [isLoading, setIsLoading] = useState(true)
-
-//   // Initialize token from sessionStorage
-//   useEffect(() => {
-//     const savedToken = getToken()
-//     setTokenState(savedToken)
-//     setIsLoading(false)
-//   }, [])
-
-//   const setToken = (newToken: string) => {
-//     saveToken(newToken)
-//     setTokenState(newToken)
-//   }
-
-//   const handleClearToken = () => {
-//     clearToken()
-//     setTokenState(null)
-//   }
-
-//   return (
-//     <TokenContext.Provider
-//       value={{ token, setToken, clearToken: handleClearToken, isLoading }}
-//     >
-//       {children}
-//     </TokenContext.Provider>
-//   )
-// }
-
-// export function useToken() {
-//   const context = useContext(TokenContext)
-//   if (context === undefined) {
-//     throw new Error('useToken must be used within TokenProvider')
-//   }
-//   return context
-// }
-
 'use client'
 
-import React, { createContext, useContext, useState, useEffect } from 'react'
-import { getToken, saveToken, clearToken } from '@/lib/storage'
+import React, { createContext, useContext, useCallback } from 'react'
+import { SessionProvider, useSession, signOut } from 'next-auth/react'
 
 interface TokenContextType {
   token: string | null
   setToken: (token: string) => void
   clearToken: () => void
   isLoading: boolean
+  refreshToken: () => Promise<string | null>
 }
 
 const TokenContext = createContext<TokenContextType | undefined>(undefined)
 
-export function TokenProvider({ children }: { children: React.ReactNode }) {
-  const [token, setTokenState] = useState<string | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
-  const [mounted, setMounted] = useState(false)
+function TokenProviderInner({ children }: { children: React.ReactNode }) {
+  const { data: session, status } = useSession()
 
-  useEffect(() => {
-    const savedToken = getToken()
-    setTokenState(savedToken)
-    setIsLoading(false)
-    setMounted(true)
+  const setToken = (_: string) => {
+    // no-op: token lifecycle is managed by OAuth
+  }
+
+  const clearToken = useCallback(() => {
+    signOut()
   }, [])
 
-  // 🔥 Quan trọng: tránh hydration mismatch
-  if (!mounted) return null
-
-  const setToken = (newToken: string) => {
-    saveToken(newToken)
-    setTokenState(newToken)
-  }
-
-  const handleClearToken = () => {
-    clearToken()
-    setTokenState(null)
-  }
+  // Fetches a guaranteed-fresh access token from the server.
+  // The server JWT callback auto-refreshes via refresh_token if expired.
+  const refreshToken = useCallback(async (): Promise<string | null> => {
+    try {
+      const res = await fetch('/api/gmail/token')
+      if (!res.ok) return null
+      const data = await res.json()
+      return (data.accessToken as string) ?? null
+    } catch {
+      return null
+    }
+  }, [])
 
   return (
     <TokenContext.Provider
-      value={{ token, setToken, clearToken: handleClearToken, isLoading }}
+      value={{
+        token: session?.accessToken ?? null,
+        setToken,
+        clearToken,
+        isLoading: status === 'loading',
+        refreshToken,
+      }}
     >
       {children}
     </TokenContext.Provider>
+  )
+}
+
+export function TokenProvider({ children }: { children: React.ReactNode }) {
+  return (
+    <SessionProvider>
+      <TokenProviderInner>{children}</TokenProviderInner>
+    </SessionProvider>
   )
 }
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Campaign, Contact, EmailTemplate } from '@/lib/types'
 import { GmailService } from '@/lib/gmail'
+import { useToken } from '@/app/components/provider/TokenProvider'
 import {
   Dialog,
   DialogContent,
@@ -54,6 +55,7 @@ export function SendDialog({
   token,
   onContactUpdate,
 }: SendDialogProps) {
+  const { refreshToken } = useToken()
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
   const [selectedCampaignId, setSelectedCampaignId] = useState(ALL_CAMPAIGNS)
   const [delay, setDelay] = useState([1000])
@@ -132,7 +134,10 @@ export function SendDialog({
     setSendLogs([])
     setProgress(0)
 
-    const gmail = new GmailService(token)
+    // Fetch a fresh token from the server before starting (auto-refreshes if expired)
+    let currentToken = (await refreshToken()) ?? token
+    let gmail = new GmailService(currentToken)
+    let lastRefreshedAt = Date.now()
     const delayMs = delay[0]
 
     const logs: SendLog[] = targetContacts.map((contact) => ({
@@ -147,6 +152,16 @@ export function SendDialog({
     for (let i = 0; i < targetContacts.length; i++) {
       const contact = targetContacts[i]
       const logIndex = logs.findIndex((l) => l.contactId === contact.id)
+
+      // Refresh token every 50 minutes so long bulk runs never hit expiry
+      if (Date.now() - lastRefreshedAt > 50 * 60 * 1000) {
+        const fresh = await refreshToken()
+        if (fresh) {
+          currentToken = fresh
+          gmail = new GmailService(currentToken)
+          lastRefreshedAt = Date.now()
+        }
+      }
 
       setSendLogs((prev) =>
         prev.map((log, idx) =>
