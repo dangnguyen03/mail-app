@@ -68,15 +68,34 @@ export function ReplyPreviewDialog({
       setError(null)
       setReplyEmail(null)
       gmail.getThread(contact.threadId).then((thread) => {
-        const lastMessage = thread.messages?.[thread.messages.length - 1]
-        if (lastMessage) {
-          const subjectHeader = lastMessage.payload?.headers.find((h) => h.name === 'Subject')?.value || '(No Subject)'
-          const fromHeader = lastMessage.payload?.headers.find((h) => h.name === 'From')?.value || '(Unknown Sender)'
-          const body = getHtmlBody(lastMessage)
-          setReplyEmail({ subject: subjectHeader, from: fromHeader, body })
-        } else {
+        const messages = thread.messages
+        if (!messages?.length) {
           setError('Could not find the reply message in the thread.')
+          return
         }
+
+        // Extract bare email address from a "Name <addr>" or "addr" header value
+        const extractAddr = (v: string) => {
+          const m = v.match(/<([^>]+)>/)
+          return (m ? m[1] : v).toLowerCase().trim()
+        }
+
+        // Sender is whoever sent the first message in the thread
+        const senderAddr = extractAddr(
+          messages[0].payload?.headers?.find((h) => h.name === 'From')?.value ?? ''
+        )
+
+        // Find the most recent message NOT from the original sender (= recipient's reply)
+        const replyMsg = [...messages].reverse().find((msg) => {
+          const addr = extractAddr(msg.payload?.headers?.find((h) => h.name === 'From')?.value ?? '')
+          return addr && addr !== senderAddr
+        })
+
+        const target = replyMsg ?? messages[messages.length - 1]
+        const subjectHeader = target.payload?.headers?.find((h) => h.name === 'Subject')?.value || '(No Subject)'
+        const fromHeader = target.payload?.headers?.find((h) => h.name === 'From')?.value || '(Unknown Sender)'
+        const body = getHtmlBody(target)
+        setReplyEmail({ subject: subjectHeader, from: fromHeader, body })
       }).catch(() => {
         setError('Failed to load the email thread. The token might be expired.')
       }).finally(() => {

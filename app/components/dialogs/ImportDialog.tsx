@@ -18,6 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { AlertCircle, Upload, CheckCircle2 } from 'lucide-react'
 
@@ -31,7 +32,7 @@ interface ContactImportCandidate {
 interface ImportDialogProps {
   isOpen: boolean
   onOpenChange: (open: boolean) => void
-  onImport: (contacts: Array<{ email: string; name: string }>) => Promise<void>
+  onImport: (contacts: Array<{ email: string; name: string }>, campaignName: string) => Promise<void>
 }
 
 interface ParsedData {
@@ -94,6 +95,7 @@ export function ImportDialog({
   const [parsedData, setParsedData] = useState<ParsedData | null>(null)
   const [emailColumn, setEmailColumn] = useState<string>('')
   const [nameColumn, setNameColumn] = useState<string>('')
+  const [campaignName, setCampaignName] = useState<string>('')
   const [error, setError] = useState<string | null>(null)
   const [isImporting, setIsImporting] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -104,7 +106,6 @@ export function ImportDialog({
     if (!selectedFile) return
 
     try {
-      // Validate file type
       if (!selectedFile.name.match(/\.(xlsx|xls|csv)$/i)) {
         setError('Please select a valid Excel or CSV file')
         return
@@ -112,7 +113,11 @@ export function ImportDialog({
 
       setFile(selectedFile)
 
-      // Parse the file
+      // Auto-fill campaign name from filename (without extension)
+      if (!campaignName) {
+        setCampaignName(selectedFile.name.replace(/\.(xlsx|xls|csv)$/i, ''))
+      }
+
       const arrayBuffer = await selectedFile.arrayBuffer()
       const workbook = read(arrayBuffer, { type: 'array' })
       const worksheet = workbook.Sheets[workbook.SheetNames[0]]
@@ -132,7 +137,7 @@ export function ImportDialog({
 
       setParsedData({ columns: headers, rows })
       setStep('map')
-      // Auto-detect columns
+
       const emailIdx = headers.findIndex((h) =>
         h?.toString().toLowerCase().includes('email')
       )
@@ -178,14 +183,14 @@ export function ImportDialog({
 
     setIsImporting(true)
     try {
-      await onImport(contacts)
+      await onImport(contacts, campaignName.trim())
       onOpenChange(false)
-      // Reset state
       setFile(null)
       setParsedData(null)
       setStep('upload')
       setEmailColumn('')
       setNameColumn('')
+      setCampaignName('')
       setError(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to import contacts')
@@ -196,19 +201,16 @@ export function ImportDialog({
 
   const getPreviewContacts = (): Array<{ email: string; name: string }> => {
     if (!parsedData) return []
-
     return buildContacts(parsedData, emailColumn, nameColumn).contacts.slice(0, 5)
   }
 
   const getValidContactsCount = (): number => {
     if (!parsedData) return 0
-
     return buildContacts(parsedData, emailColumn, nameColumn).contacts.length
   }
 
   const getSkippedContactsCount = (): number => {
     if (!parsedData) return 0
-
     return buildContacts(parsedData, emailColumn, nameColumn).skippedCount
   }
 
@@ -231,6 +233,19 @@ export function ImportDialog({
 
         {step === 'upload' && (
           <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium block mb-2">
+                Campaign Name <span className="text-muted-foreground font-normal">(optional)</span>
+              </label>
+              <Input
+                placeholder="e.g. Q2 Outreach, Tech Companies..."
+                value={campaignName}
+                onChange={(e) => setCampaignName(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground mt-1">
+                Groups these contacts so you can filter and delete them together.
+              </p>
+            </div>
             <div
               className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:bg-muted transition"
               onClick={() => fileInputRef.current?.click()}
@@ -260,9 +275,7 @@ export function ImportDialog({
         {step === 'map' && parsedData && (
           <div className="space-y-4">
             <div>
-              <label className="text-sm font-medium block mb-2">
-                Email Column
-              </label>
+              <label className="text-sm font-medium block mb-2">Email Column</label>
               <Select value={emailColumn} onValueChange={setEmailColumn}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select email column" />
@@ -278,9 +291,7 @@ export function ImportDialog({
             </div>
 
             <div>
-              <label className="text-sm font-medium block mb-2">
-                Name Column
-              </label>
+              <label className="text-sm font-medium block mb-2">Name Column</label>
               <Select value={nameColumn} onValueChange={setNameColumn}>
                 <SelectTrigger>
                   <SelectValue placeholder="Use email as fallback name" />
@@ -302,6 +313,12 @@ export function ImportDialog({
 
         {step === 'preview' && (
           <div className="space-y-4">
+            {campaignName && (
+              <div className="bg-muted p-3 rounded-lg text-sm">
+                <span className="font-medium">Campaign: </span>
+                <span>{campaignName}</span>
+              </div>
+            )}
             <div className="bg-muted p-4 rounded-lg">
               <p className="text-sm font-medium mb-2">Found {getValidContactsCount()} valid contacts</p>
               {getSkippedContactsCount() > 0 && (
@@ -350,10 +367,7 @@ export function ImportDialog({
             <Button onClick={handleMappingSubmit}>Review Data</Button>
           )}
           {step === 'preview' && (
-            <Button
-              onClick={handleImportSubmit}
-              disabled={isImporting}
-            >
+            <Button onClick={handleImportSubmit} disabled={isImporting}>
               {isImporting ? 'Importing...' : 'Import Contacts'}
             </Button>
           )}

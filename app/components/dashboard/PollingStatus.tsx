@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Contact } from '@/lib/types'
+import { GmailService } from '@/lib/gmail'
 import { useReplyTracking } from '@/app/hooks/useReplyTracking'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,11 +21,14 @@ export function PollingStatus({
   onReplyDetected,
 }: PollingStatusProps) {
   const [isEnabled, setIsEnabled] = useState(false)
+  const [userEmail, setUserEmail] = useState('')
   const { isPolling, lastChecked, error, startPolling, stopPolling } =
     useReplyTracking(token)
 
-  // Get user email from token if possible
-  const userEmail = 'your.email@gmail.com'
+  useEffect(() => {
+    if (!token) return
+    new GmailService(token).getProfile().then((p) => setUserEmail(p.emailAddress)).catch(() => {})
+  }, [token])
 
   const handleTogglePolling = () => {
     if (!isEnabled) {
@@ -84,7 +88,7 @@ export function PollingStatus({
 
           <Button
             onClick={handleTogglePolling}
-            disabled={sentContacts.length === 0 || !token}
+            disabled={sentContacts.length === 0 || !token || !userEmail}
             variant={isEnabled ? 'destructive' : 'default'}
             className="w-full gap-2 cursor-pointer"
           >

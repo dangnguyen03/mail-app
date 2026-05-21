@@ -1,17 +1,19 @@
-import { Contact, EmailTemplate, SendLog } from './types'
+import { Campaign, Contact, EmailTemplate, SendLog } from './types'
 
 const DB_NAME = 'EmailTrackerDB'
-const DB_VERSION = 1
+const DB_VERSION = 3
 
 const STORES = {
   CONTACTS: 'contacts',
   TEMPLATES: 'emailTemplates',
   SEND_LOG: 'sendLog',
+  CAMPAIGNS: 'campaigns',
 }
 
 let db: IDBDatabase | null = null
 
 export async function initDB(): Promise<IDBDatabase> {
+  if (db) return db
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
 
@@ -26,27 +28,44 @@ export async function initDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const database = (event.target as IDBOpenDBRequest).result
+      const tx = (event.target as IDBOpenDBRequest).transaction!
 
-      // Create contacts store
       if (!database.objectStoreNames.contains(STORES.CONTACTS)) {
-        const contactStore = database.createObjectStore(STORES.CONTACTS, {
-          keyPath: 'id',
-        })
-        contactStore.createIndex('email', 'email', { unique: true })
+        // Fresh install: email is NOT unique — same email can exist in multiple campaigns
+        const contactStore = database.createObjectStore(STORES.CONTACTS, { keyPath: 'id' })
+        contactStore.createIndex('email', 'email', { unique: false })
         contactStore.createIndex('status', 'status', { unique: false })
+        contactStore.createIndex('campaignId', 'campaignId', { unique: false })
+      } else {
+        const contactStore = tx.objectStore(STORES.CONTACTS)
+
+        // v2 migration: add campaignId index
+        if (event.oldVersion < 2) {
+          if (!contactStore.indexNames.contains('campaignId')) {
+            contactStore.createIndex('campaignId', 'campaignId', { unique: false })
+          }
+        }
+
+        // v3 migration: drop unique constraint on email index
+        if (event.oldVersion < 3) {
+          if (contactStore.indexNames.contains('email')) {
+            contactStore.deleteIndex('email')
+          }
+          contactStore.createIndex('email', 'email', { unique: false })
+        }
       }
 
-      // Create templates store
       if (!database.objectStoreNames.contains(STORES.TEMPLATES)) {
         database.createObjectStore(STORES.TEMPLATES, { keyPath: 'id' })
       }
 
-      // Create send log store
       if (!database.objectStoreNames.contains(STORES.SEND_LOG)) {
-        const logStore = database.createObjectStore(STORES.SEND_LOG, {
-          keyPath: 'id',
-        })
+        const logStore = database.createObjectStore(STORES.SEND_LOG, { keyPath: 'id' })
         logStore.createIndex('contactId', 'contactId', { unique: false })
+      }
+
+      if (!database.objectStoreNames.contains(STORES.CAMPAIGNS)) {
+        database.createObjectStore(STORES.CAMPAIGNS, { keyPath: 'id' })
       }
     }
   })
@@ -108,9 +127,7 @@ export async function getAllContacts(): Promise<Contact[]> {
   })
 }
 
-export async function getContactsByStatus(
-  status: string
-): Promise<Contact[]> {
+export async function getContactsByStatus(status: string): Promise<Contact[]> {
   const database = getDB()
   return new Promise((resolve, reject) => {
     const tx = database.transaction(STORES.CONTACTS, 'readonly')
@@ -119,6 +136,19 @@ export async function getContactsByStatus(
     const request = index.getAll(status)
 
     request.onerror = () => reject(new Error('Failed to get contacts by status'))
+    request.onsuccess = () => resolve(request.result || [])
+  })
+}
+
+export async function getContactsByCampaignId(campaignId: string): Promise<Contact[]> {
+  const database = getDB()
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(STORES.CONTACTS, 'readonly')
+    const store = tx.objectStore(STORES.CONTACTS)
+    const index = store.index('campaignId')
+    const request = index.getAll(campaignId)
+
+    request.onerror = () => reject(new Error('Failed to get contacts by campaign'))
     request.onsuccess = () => resolve(request.result || [])
   })
 }
@@ -132,6 +162,28 @@ export async function deleteContact(id: string): Promise<void> {
 
     request.onerror = () => reject(new Error('Failed to delete contact'))
     request.onsuccess = () => resolve()
+  })
+}
+
+export async function deleteContactsByCampaignId(campaignId: string): Promise<void> {
+  const database = getDB()
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(STORES.CONTACTS, 'readwrite')
+    const store = tx.objectStore(STORES.CONTACTS)
+    const index = store.index('campaignId')
+    const request = index.openCursor(IDBKeyRange.only(campaignId))
+
+    request.onerror = () => reject(new Error('Failed to delete contacts by campaign'))
+    request.onsuccess = (event) => {
+      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result
+      if (cursor) {
+        cursor.delete()
+        cursor.continue()
+      }
+    }
+
+    tx.oncomplete = () => resolve()
+    tx.onerror = () => reject(new Error('Transaction failed'))
   })
 }
 
@@ -160,9 +212,7 @@ export async function addTemplate(template: EmailTemplate): Promise<EmailTemplat
   })
 }
 
-export async function updateTemplate(
-  template: EmailTemplate
-): Promise<EmailTemplate> {
+export async function updateTemplate(template: EmailTemplate): Promise<EmailTemplate> {
   const database = getDB()
   return new Promise((resolve, reject) => {
     const tx = database.transaction(STORES.TEMPLATES, 'readwrite')
@@ -219,8 +269,44 @@ export async function getSendLogByContactId(contactId: string): Promise<SendLog[
     const index = store.index('contactId')
     const request = index.getAll(contactId)
 
-    request.onerror = () =>
-      reject(new Error('Failed to get send log by contact'))
+    request.onerror = () => reject(new Error('Failed to get send log by contact'))
     request.onsuccess = () => resolve(request.result || [])
+  })
+}
+
+// Campaign operations
+export async function addCampaign(campaign: Campaign): Promise<Campaign> {
+  const database = getDB()
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(STORES.CAMPAIGNS, 'readwrite')
+    const store = tx.objectStore(STORES.CAMPAIGNS)
+    const request = store.add(campaign)
+
+    request.onerror = () => reject(new Error('Failed to add campaign'))
+    request.onsuccess = () => resolve(campaign)
+  })
+}
+
+export async function getAllCampaigns(): Promise<Campaign[]> {
+  const database = getDB()
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(STORES.CAMPAIGNS, 'readonly')
+    const store = tx.objectStore(STORES.CAMPAIGNS)
+    const request = store.getAll()
+
+    request.onerror = () => reject(new Error('Failed to get campaigns'))
+    request.onsuccess = () => resolve(request.result || [])
+  })
+}
+
+export async function deleteCampaignById(id: string): Promise<void> {
+  const database = getDB()
+  return new Promise((resolve, reject) => {
+    const tx = database.transaction(STORES.CAMPAIGNS, 'readwrite')
+    const store = tx.objectStore(STORES.CAMPAIGNS)
+    const request = store.delete(id)
+
+    request.onerror = () => reject(new Error('Failed to delete campaign'))
+    request.onsuccess = () => resolve()
   })
 }

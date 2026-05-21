@@ -20,7 +20,9 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { AlertCircle, ChevronDown, Mail } from 'lucide-react'
+import { AlertCircle, ChevronDown, Mail, RotateCcw } from 'lucide-react'
+
+export type ResendMode = 'resend' | 'remind'
 
 interface ResendDialogProps {
   isOpen: boolean
@@ -28,7 +30,8 @@ interface ResendDialogProps {
   contact?: Contact
   templates: EmailTemplate[]
   token: string | null
-  onResendSuccess: (contact: Contact, messageId: string, threadId: string) => void
+  mode?: ResendMode
+  onResendSuccess: (contact: Contact, messageId: string, threadId: string, rfc822MessageId?: string, threadIndex?: string) => void
 }
 
 export function ResendDialog({
@@ -37,6 +40,7 @@ export function ResendDialog({
   contact,
   templates,
   token,
+  mode = 'resend',
   onResendSuccess,
 }: ResendDialogProps) {
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
@@ -45,10 +49,12 @@ export function ResendDialog({
   const [originalEmail, setOriginalEmail] = useState<{ subject: string; body: string; snippet: string } | null>(null)
   const [isLoadingOriginal, setIsLoadingOriginal] = useState(false)
   const [showOriginal, setShowOriginal] = useState(false)
+  // RFC 2822 Message-IDs extracted from the thread — passed to sendEmail so
+  // In-Reply-To / References headers are set correctly for recipient threading.
+  const [threadMessageIds, setThreadMessageIds] = useState<string[]>([])
 
   const gmail = useMemo(() => (token ? new GmailService(token) : null), [token])
 
-  // Function to find the HTML part of a message
   const getHtmlBody = (message: any): string => {
     let encodedBody = ''
 
@@ -72,7 +78,6 @@ export function ResendDialog({
 
     if (encodedBody) {
       try {
-        // Decode base64url
         const base64 = encodedBody.replace(/-/g, '+').replace(/_/g, '/')
         return decodeURIComponent(
           atob(base64)
@@ -93,30 +98,61 @@ export function ResendDialog({
       setSelectedTemplateId(templates[0].id)
     }
 
-    if (isOpen && contact?.status === 'replied' && contact.threadId && gmail) {
+    if (isOpen && mode === 'remind' && contact?.threadId && gmail) {
       setIsLoadingOriginal(true)
+      setOriginalEmail(null)
+      setThreadMessageIds([])
+
       gmail
         .getThread(contact.threadId)
         .then((thread) => {
-          const lastMessage = thread.messages?.[thread.messages.length - 1]
-          if (lastMessage) {
-            const subjectHeader = lastMessage.payload?.headers.find((h) => h.name === 'Subject')
-            const body = getHtmlBody(lastMessage)
-            setOriginalEmail({
-              subject: subjectHeader?.value || '(No Subject)',
-              snippet: lastMessage.snippet || '(No Content)',
-              body: body,
-            })
-          }
+          if (!thread.messages?.length) return
+
+          // Extract RFC 2822 Message-IDs from every message in the thread.
+          // These are the <CA+...@mail.gmail.com> header values — NOT Gmail's
+          // internal numeric IDs — needed so recipient clients thread the reply.
+          const rfcIds = thread.messages
+            .map((msg) =>
+              msg.payload?.headers?.find(
+                (h) => h.name.toLowerCase() === 'message-id'
+              )?.value
+            )
+            .filter((id): id is string => Boolean(id))
+
+          setThreadMessageIds(rfcIds)
+
+          // Subject must come from the FIRST message (original email) so that
+          // Thread-Topic stays consistent across all reminds. Using the last
+          // message's subject would use the remind template subject after the
+          // first remind, breaking Outlook's Thread-Topic chain.
+          const firstMessage = thread.messages[0]
+          const lastMessage = thread.messages[thread.messages.length - 1]
+          const subjectHeader = firstMessage.payload?.headers?.find((h) => h.name === 'Subject')
+          const body = getHtmlBody(lastMessage)
+          setOriginalEmail({
+            subject: subjectHeader?.value || '(No Subject)',
+            snippet: lastMessage.snippet || '(No Content)',
+            body,
+          })
         })
         .catch(() => setError('Could not load original email thread.'))
         .finally(() => setIsLoadingOriginal(false))
     }
-  }, [templates, selectedTemplateId, isOpen, contact, gmail])
+  }, [templates, selectedTemplateId, isOpen, contact, gmail, mode])
 
-  const handleResend = async () => {
+  const handleSend = async () => {
     if (!contact || !selectedTemplateId || !token) {
       setError('Missing required information')
+      return
+    }
+
+    if (mode === 'remind' && !contact.threadId) {
+      setError('No thread found for this contact. Use Resend to send a new email instead.')
+      return
+    }
+
+    if (mode === 'remind' && isLoadingOriginal) {
+      setError('Original thread is still loading. Please wait a moment and try again.')
       return
     }
 
@@ -132,22 +168,46 @@ export function ResendDialog({
     try {
       if (!gmail) throw new Error('Gmail service not available.')
 
-      // Interpolate template variables
-      const subject = template.subject.replace(/{{name}}/g, contact.name)
+      const templateSubject = template.subject.replace(/{{name}}/g, contact.name)
       const body = template.body.replace(/{{name}}/g, contact.name)
 
-      // Send using the threadId to keep conversation
+      const isRemind = mode === 'remind'
+      const subject = isRemind
+        ? (originalEmail?.subject || templateSubject)
+        : templateSubject
+
+      // In-Reply-To must point to the FIRST (original) email's Message-ID — the
+      // one message we know the recipient definitely has in their inbox.
+      // Using the last message is unreliable: if a previous remind failed to
+      // thread in the recipient's mailbox, its ID doesn't exist in their thread,
+      // and every subsequent remind also fails.
+      // References carries the full chain so clients can reconstruct history.
+      const storedMessageId = contact.rfc822MessageId
+      const inReplyToMessageId = isRemind
+        ? (threadMessageIds.length > 0 ? threadMessageIds[0] : storedMessageId)
+        : undefined
+      const referencesHeader = isRemind
+        ? (threadMessageIds.length > 0 ? threadMessageIds.join(' ') : storedMessageId)
+        : undefined
+
       const response = await gmail.sendEmail({
         to: contact.email,
         subject,
         body,
-        threadId: contact.threadId,
+        bodyType: template.bodyType ?? 'html',
+        threadId: isRemind ? contact.threadId : undefined,
+        inReplyToMessageId,
+        referencesHeader,
+        // Outlook Thread-Index: append to stored parent index if available
+        parentThreadIndex: isRemind ? contact.threadIndex : undefined,
+        // Outlook Thread-Topic: use original email's subject so conversation header is consistent
+        threadTopic: isRemind ? (originalEmail?.subject ?? subject) : subject,
       })
 
-      onResendSuccess(contact, response.id, response.threadId)
+      onResendSuccess(contact, response.id, response.threadId, response.rfc822MessageId, response.threadIndex)
       onOpenChange(false)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to resend email')
+      setError(err instanceof Error ? err.message : 'Failed to send email')
     } finally {
       setIsSending(false)
     }
@@ -155,16 +215,27 @@ export function ResendDialog({
 
   const selectedTemplate = templates.find((t) => t.id === selectedTemplateId)
 
+  const dialogTitle =
+    mode === 'remind'
+      ? 'Remind (Reply)'
+      : contact?.status === 'pending'
+      ? 'Send Email'
+      : 'Resend Email'
+
+  const dialogDescription =
+    mode === 'remind'
+      ? `Send a reply in the existing thread to ${contact?.name} (${contact?.email})`
+      : `Send a follow-up email to ${contact?.name} (${contact?.email})`
+
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>
-            {contact?.status === 'pending' ? 'Send Email' : 'Resend Email'}
+          <DialogTitle className="flex items-center gap-2">
+            {mode === 'remind' && <RotateCcw className="w-4 h-4" />}
+            {dialogTitle}
           </DialogTitle>
-          <DialogDescription>
-            Send a follow-up email to {contact?.name} ({contact?.email})
-          </DialogDescription>
+          <DialogDescription>{dialogDescription}</DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4">
@@ -176,9 +247,7 @@ export function ResendDialog({
           )}
 
           <div>
-            <label className="text-sm font-medium block mb-2">
-              Template to use
-            </label>
+            <label className="text-sm font-medium block mb-2">Template to use</label>
             <Select value={selectedTemplateId} onValueChange={setSelectedTemplateId}>
               <SelectTrigger>
                 <SelectValue placeholder="Select a template" />
@@ -197,10 +266,7 @@ export function ResendDialog({
             <div className="bg-muted p-3 rounded-lg text-sm">
               <p className="font-medium mb-2">Preview:</p>
               <p className="font-semibold mb-2">
-                {selectedTemplate.subject.replace(
-                  /{{name}}/g,
-                  contact?.name || 'Recipient'
-                )}
+                {selectedTemplate.subject.replace(/{{name}}/g, contact?.name || 'Recipient')}
               </p>
               <div
                 className="prose prose-sm dark:prose-invert max-w-none overflow-hidden text-ellipsis h-24 text-xs"
@@ -210,7 +276,8 @@ export function ResendDialog({
               />
             </div>
           )}
-          {contact?.status === 'replied' && (
+
+          {mode === 'remind' && (
             <Alert>
               <div className="flex flex-col">
                 <div className="flex items-start">
@@ -220,7 +287,9 @@ export function ResendDialog({
                     <AlertDescription>
                       {isLoadingOriginal
                         ? 'Loading original email...'
-                        : `This will be sent as a reply to: "${originalEmail?.subject}"`}
+                        : originalEmail
+                        ? `Reply to: "${originalEmail.subject}"`
+                        : 'This will be sent as a reply to the original thread.'}
                     </AlertDescription>
                   </div>
                   {originalEmail && (
@@ -247,12 +316,12 @@ export function ResendDialog({
               </div>
             </Alert>
           )}
-          {!contact?.threadId && contact?.status !== 'pending' && (
-            <Alert variant="destructive">
+
+          {mode === 'resend' && (
+            <Alert>
               <AlertCircle className="h-4 w-4" />
-              <AlertTitle>No Thread Found</AlertTitle>
               <AlertDescription>
-                This email will be sent as a new conversation.
+                This will be sent as a <strong>new email</strong> (not a reply).
               </AlertDescription>
             </Alert>
           )}
@@ -263,10 +332,10 @@ export function ResendDialog({
             Cancel
           </Button>
           <Button
-            onClick={handleResend}
-            disabled={!selectedTemplateId || isSending}
+            onClick={handleSend}
+            disabled={!selectedTemplateId || isSending || (mode === 'remind' && isLoadingOriginal)}
           >
-            {isSending ? 'Sending...' : 'Send Email'}
+            {isSending ? 'Sending...' : mode === 'remind' ? 'Send Reply' : 'Send Email'}
           </Button>
         </DialogFooter>
       </DialogContent>

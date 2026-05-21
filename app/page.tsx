@@ -6,7 +6,7 @@ import { TokenDialog } from './components/dialogs/TokenDialog'
 import { ImportDialog } from './components/dialogs/ImportDialog'
 import { TemplateDialog } from './components/dialogs/TemplateDialog'
 import { SendDialog } from './components/dialogs/SendDialog'
-import { ResendDialog } from './components/dialogs/ResendDialog'
+import { ResendDialog, ResendMode } from './components/dialogs/ResendDialog'
 import { ReplyPreviewDialog } from './components/dialogs/ReplyPreviewDialog'
 import { DashboardStats } from './components/dashboard/DashboardStats'
 import { PollingStatus } from './components/dashboard/PollingStatus'
@@ -14,6 +14,7 @@ import { GettingStarted } from './components/dashboard/GettingStarted'
 import { ContactTable } from './components/contacts/ContactTable'
 import { useContacts } from './hooks/useContacts'
 import { useTemplates } from './hooks/useTemplates'
+import { useCampaigns } from './hooks/useCampaigns'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -25,14 +26,29 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { LogOut, Plus, Upload, Send, Trash2 } from 'lucide-react'
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu'
+import { LogOut, Plus, Upload, Send, Trash2, ChevronDown, FolderX } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
 import { EmailTemplate } from '@/lib/types'
 
 export default function Page() {
-  const { token, setToken, clearToken, isLoading: tokenLoading } = useToken()
-  const { contacts, isLoading: contactsLoading, removeContact, bulkCreateContacts, updateContactStatus, incrementResendCount, clearAllContacts } = useContacts()
-  const { templates, isLoading: templatesLoading, createTemplate, updateTemplateContent, removeTemplate } = useTemplates()
+  const { token, clearToken, isLoading: tokenLoading } = useToken()
+  const {
+    contacts,
+    removeContact,
+    removeContactsByCampaign,
+    bulkCreateContacts,
+    updateContactStatus,
+    incrementResendCount,
+    clearAllContacts,
+  } = useContacts()
+  const { templates, createTemplate, updateTemplateContent, removeTemplate } = useTemplates()
+  const { campaigns, createCampaign, removeCampaign } = useCampaigns()
   const { toast } = useToast()
 
   const [showTokenDialog, setShowTokenDialog] = useState(false)
@@ -43,12 +59,15 @@ export default function Page() {
   const [showReplyPreviewDialog, setShowReplyPreviewDialog] = useState(false)
   const [selectedContactForResend, setSelectedContactForResend] = useState<string | null>(null)
   const [selectedContactForPreview, setSelectedContactForPreview] = useState<string | null>(null)
+  const [resendMode, setResendMode] = useState<ResendMode>('resend')
   const [activeTab, setActiveTab] = useState<'all' | 'replied' | 'not-replied'>('all')
+  const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null)
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null)
 
   // AlertDialog states
   const [deleteContactId, setDeleteContactId] = useState<string | null>(null)
   const [showClearAllConfirm, setShowClearAllConfirm] = useState(false)
+  const [deleteCampaignId, setDeleteCampaignId] = useState<string | null>(null)
 
   // ── Contact handlers ──
   const handleDelete = (id: string) => {
@@ -64,11 +83,19 @@ export default function Page() {
 
   const handleSend = (id: string) => {
     setSelectedContactForResend(id)
+    setResendMode('resend')
     setShowResendDialog(true)
   }
 
   const handleResend = (id: string) => {
     setSelectedContactForResend(id)
+    setResendMode('resend')
+    setShowResendDialog(true)
+  }
+
+  const handleRemind = (id: string) => {
+    setSelectedContactForResend(id)
+    setResendMode('remind')
     setShowResendDialog(true)
   }
 
@@ -77,17 +104,28 @@ export default function Page() {
     setShowReplyPreviewDialog(true)
   }
 
-  const handleImport = async (contactsData: Array<{ email: string; name: string }>) => {
+  const handleImport = async (contactsData: Array<{ email: string; name: string }>, campaignName: string) => {
     try {
-      const result = await bulkCreateContacts(contactsData)
+      let campaignId: string | undefined
+
+      if (campaignName.trim()) {
+        // Reuse existing campaign with the same name (case-insensitive) instead of creating a duplicate
+        const existing = campaigns.find(
+          (c) => c.name.toLowerCase() === campaignName.trim().toLowerCase()
+        )
+        const campaign = existing ?? (await createCampaign(campaignName))
+        campaignId = campaign.id
+      }
+
+      const result = await bulkCreateContacts(contactsData, campaignId)
       const skippedCount = result.duplicateCount + result.invalidCount
 
       toast({
         title: 'Success',
         description:
           skippedCount > 0
-            ? `Imported ${result.created.length} contacts. Skipped ${skippedCount} invalid or duplicate rows.`
-            : `Imported ${result.created.length} contacts`,
+            ? `Imported ${result.created.length} contacts${campaignName ? ` into "${campaignName}"` : ''}. Skipped ${skippedCount} invalid or duplicate rows.`
+            : `Imported ${result.created.length} contacts${campaignName ? ` into "${campaignName}"` : ''}`,
       })
     } catch (err) {
       toast({ title: 'Error', description: 'Failed to import contacts', variant: 'destructive' })
@@ -102,6 +140,21 @@ export default function Page() {
     await clearAllContacts()
     toast({ title: 'All contacts deleted' })
     setShowClearAllConfirm(false)
+  }
+
+  const handleDeleteCampaign = (campaignId: string) => {
+    setDeleteCampaignId(campaignId)
+  }
+
+  const handleDeleteCampaignConfirmed = async () => {
+    if (!deleteCampaignId) return
+    await removeContactsByCampaign(deleteCampaignId)
+    await removeCampaign(deleteCampaignId)
+    if (activeCampaignId === deleteCampaignId) {
+      setActiveCampaignId(null)
+    }
+    toast({ title: 'Campaign deleted' })
+    setDeleteCampaignId(null)
   }
 
   // ── Template handlers ──
@@ -139,9 +192,16 @@ export default function Page() {
     }
   }
 
-  const handleContactUpdate = async (contactId: string, status: 'sent' | 'failed', messageId?: string, threadId?: string) => {
+  const handleContactUpdate = async (
+    contactId: string,
+    status: 'sent' | 'failed',
+    messageId?: string,
+    threadId?: string,
+    rfc822MessageId?: string,
+    threadIndex?: string,
+  ) => {
     if (status === 'sent') {
-      await updateContactStatus(contactId, 'sent', messageId, threadId)
+      await updateContactStatus(contactId, 'sent', messageId, threadId, rfc822MessageId, threadIndex)
     }
   }
 
@@ -150,10 +210,20 @@ export default function Page() {
     toast({ title: 'Reply detected!', description: 'A recipient has replied.' })
   }
 
-  const handleResendSuccess = async (contact: { id: string }, messageId: string, threadId: string) => {
-    await incrementResendCount(contact.id)
-    await updateContactStatus(contact.id, 'sent', messageId, threadId)
-    toast({ title: 'Email resent successfully' })
+  const handleResendSuccess = async (
+    contact: { id: string },
+    messageId: string,
+    threadId: string,
+    rfc822MessageId?: string,
+    threadIndex?: string,
+  ) => {
+    // For remind mode: preserve the original rfc822MessageId so future reminds
+    // can always use In-Reply-To = original email's Message-ID.
+    // Only update rfc822MessageId on a fresh resend (new thread).
+    const newRfc822MessageId = resendMode === 'remind' ? undefined : rfc822MessageId
+    await incrementResendCount(contact.id, newRfc822MessageId, threadIndex)
+    await updateContactStatus(contact.id, 'sent', messageId, threadId, newRfc822MessageId, threadIndex)
+    toast({ title: resendMode === 'remind' ? 'Reminder sent successfully' : 'Email resent successfully' })
   }
 
   useEffect(() => {
@@ -190,13 +260,19 @@ export default function Page() {
     )
   }
 
+  // Filter by status tab then by campaign
   const filteredContacts = contacts.filter((contact) => {
-    if (activeTab === 'replied') return contact.status === 'replied'
-    if (activeTab === 'not-replied') return contact.status === 'sent'
+    if (activeTab === 'replied' && contact.status !== 'replied') return false
+    if (activeTab === 'not-replied' && contact.status !== 'sent') return false
+    if (activeCampaignId && contact.campaignId !== activeCampaignId) return false
     return true
   })
 
   const deletingContact = contacts.find((c) => c.id === deleteContactId)
+  const deletingCampaign = campaigns.find((c) => c.id === deleteCampaignId)
+  const deletingCampaignContactCount = deleteCampaignId
+    ? contacts.filter((c) => c.campaignId === deleteCampaignId).length
+    : 0
 
   return (
     <div className="min-h-screen bg-background">
@@ -237,10 +313,41 @@ export default function Page() {
                 <Upload className="w-4 h-4" />
                 Import Contacts
               </Button>
-              <Button size="lg" variant="destructive" className="gap-2 cursor-pointer" onClick={handleClearAllContacts} disabled={contacts.length === 0}>
-                <Trash2 className="w-4 h-4" />
-                Clear All Contacts
-              </Button>
+
+              {/* Delete: single button if no campaigns, dropdown if campaigns exist */}
+              {campaigns.length === 0 ? (
+                <Button size="lg" variant="destructive" className="gap-2 cursor-pointer" onClick={handleClearAllContacts} disabled={contacts.length === 0}>
+                  <Trash2 className="w-4 h-4" />
+                  Clear All
+                </Button>
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button size="lg" variant="destructive" className="gap-2 cursor-pointer" disabled={contacts.length === 0}>
+                      <Trash2 className="w-4 h-4" />
+                      Delete
+                      <ChevronDown className="w-4 h-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent>
+                    <DropdownMenuItem onClick={handleClearAllContacts} className="gap-2 cursor-pointer">
+                      <Trash2 className="w-4 h-4" />
+                      Clear All Contacts
+                    </DropdownMenuItem>
+                    {campaigns.map((campaign) => (
+                      <DropdownMenuItem
+                        key={campaign.id}
+                        onClick={() => handleDeleteCampaign(campaign.id)}
+                        className="gap-2 cursor-pointer"
+                      >
+                        <FolderX className="w-4 h-4" />
+                        Delete "{campaign.name}"
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
+
               <Button size="lg" variant="outline" className="gap-2 cursor-pointer" onClick={handleOpenNewTemplate}>
                 <Plus className="w-4 h-4" />
                 New Template
@@ -271,15 +378,59 @@ export default function Page() {
             )}
 
             <div className="space-y-6">
+              {/* Campaign filter */}
+              {campaigns.length > 0 && (
+                <div className="flex flex-wrap gap-2 pb-2">
+                  <button
+                    onClick={() => setActiveCampaignId(null)}
+                    className={`px-3 py-1 rounded-full text-sm font-medium border transition ${
+                      activeCampaignId === null
+                        ? 'bg-primary text-primary-foreground border-primary'
+                        : 'border-border text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    All campaigns
+                  </button>
+                  {campaigns.map((campaign) => {
+                    const count = contacts.filter((c) => c.campaignId === campaign.id).length
+                    return (
+                      <div key={campaign.id} className="flex items-center gap-1">
+                        <button
+                          onClick={() => setActiveCampaignId(campaign.id)}
+                          className={`px-3 py-1 rounded-full text-sm font-medium border transition ${
+                            activeCampaignId === campaign.id
+                              ? 'bg-primary text-primary-foreground border-primary'
+                              : 'border-border text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          {campaign.name} ({count})
+                        </button>
+                        <button
+                          onClick={() => handleDeleteCampaign(campaign.id)}
+                          className="text-muted-foreground hover:text-destructive transition"
+                          title={`Delete campaign "${campaign.name}"`}
+                        >
+                          <FolderX className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {/* Status tabs */}
               <div className="border-b">
                 <div className="flex gap-4 overflow-x-auto">
                   {(['all', 'replied', 'not-replied'] as const).map((tab) => {
+                    const base = activeCampaignId
+                      ? contacts.filter((c) => c.campaignId === activeCampaignId)
+                      : contacts
                     const count =
                       tab === 'all'
-                        ? contacts.length
+                        ? base.length
                         : tab === 'replied'
-                        ? contacts.filter((c) => c.status === 'replied').length
-                        : contacts.filter((c) => c.status === 'sent').length
+                        ? base.filter((c) => c.status === 'replied').length
+                        : base.filter((c) => c.status === 'sent').length
                     const label =
                       tab === 'all' ? 'All' : tab === 'replied' ? 'Replied' : 'Not Replied'
                     return (
@@ -301,9 +452,11 @@ export default function Page() {
 
               <ContactTable
                 contacts={filteredContacts}
+                campaigns={campaigns}
                 onDelete={handleDelete}
                 onSend={handleSend}
                 onResend={handleResend}
+                onRemind={handleRemind}
                 onViewReply={handleViewReply}
               />
             </div>
@@ -340,6 +493,7 @@ export default function Page() {
             isOpen={showSendDialog}
             onOpenChange={setShowSendDialog}
             contacts={contacts}
+            campaigns={campaigns}
             templates={templates}
             token={token}
             onContactUpdate={handleContactUpdate}
@@ -347,10 +501,14 @@ export default function Page() {
           {selectedContactForResend && (
             <ResendDialog
               isOpen={showResendDialog}
-              onOpenChange={setShowResendDialog}
+              onOpenChange={(open) => {
+                setShowResendDialog(open)
+                if (!open) setSelectedContactForResend(null)
+              }}
               contact={contacts.find((c) => c.id === selectedContactForResend)}
               templates={templates}
               token={token}
+              mode={resendMode}
               onResendSuccess={handleResendSuccess}
             />
           )}
@@ -365,7 +523,7 @@ export default function Page() {
         </>
       )}
 
-      {/* ── AlertDialog: xoá 1 contact ── */}
+      {/* ── AlertDialog: delete 1 contact ── */}
       <AlertDialog open={!!deleteContactId} onOpenChange={(open) => !open && setDeleteContactId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -381,7 +539,7 @@ export default function Page() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setDeleteContactId(null)} className='cursor-pointer'>Cancel</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => setDeleteContactId(null)} className="cursor-pointer">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleDeleteConfirmed}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90 text-white cursor-pointer"
@@ -392,7 +550,7 @@ export default function Page() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* ── AlertDialog: xoá tất cả contacts ── */}
+      {/* ── AlertDialog: clear all contacts ── */}
       <AlertDialog open={showClearAllConfirm} onOpenChange={setShowClearAllConfirm}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -404,12 +562,37 @@ export default function Page() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className='cursor-pointer'>Cancel</AlertDialogCancel>
+            <AlertDialogCancel className="cursor-pointer">Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleClearAllConfirmed}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer text-white"
             >
               Delete all
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ── AlertDialog: delete campaign ── */}
+      <AlertDialog open={!!deleteCampaignId} onOpenChange={(open) => !open && setDeleteCampaignId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete campaign?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete the campaign{' '}
+              <span className="font-medium text-foreground">"{deletingCampaign?.name}"</span>{' '}
+              and all{' '}
+              <span className="font-medium text-foreground">{deletingCampaignContactCount} contacts</span>{' '}
+              in it. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setDeleteCampaignId(null)} className="cursor-pointer">Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteCampaignConfirmed}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 cursor-pointer text-white"
+            >
+              Delete campaign
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

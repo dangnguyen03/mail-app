@@ -8,6 +8,7 @@ import {
   getContact,
   getAllContacts,
   deleteContact,
+  deleteContactsByCampaignId,
   initDB,
   clearAll,
   getContactsByStatus,
@@ -37,7 +38,6 @@ export function useContacts() {
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
 
-  // Initialize DB and load contacts
   useEffect(() => {
     const init = async () => {
       try {
@@ -77,7 +77,14 @@ export function useContacts() {
     []
   )
 
-  const updateContactStatus = useCallback(async (id: string, status: ContactStatus, messageId?: string, threadId?: string) => {
+  const updateContactStatus = useCallback(async (
+    id: string,
+    status: ContactStatus,
+    messageId?: string,
+    threadId?: string,
+    rfc822MessageId?: string,
+    threadIndex?: string,
+  ) => {
     try {
       const contact = await getContact(id)
       if (!contact) throw new Error('Contact not found')
@@ -87,6 +94,8 @@ export function useContacts() {
         status,
         messageId: messageId || contact.messageId,
         threadId: threadId || contact.threadId,
+        rfc822MessageId: rfc822MessageId || contact.rfc822MessageId,
+        threadIndex: threadIndex || contact.threadIndex,
         lastSentAt: status === 'sent' ? Date.now() : contact.lastSentAt,
       }
 
@@ -103,11 +112,19 @@ export function useContacts() {
   }, [])
 
   const bulkCreateContacts = useCallback(
-    async (data: Array<{ email: string; name: string }>): Promise<BulkCreateContactsResult> => {
+    async (
+      data: Array<{ email: string; name: string }>,
+      campaignId?: string
+    ): Promise<BulkCreateContactsResult> => {
       try {
         const existingContacts = await getAllContacts()
+        // Deduplication is scoped to the same campaign:
+        // same email is allowed in different campaigns, but not twice in the same one.
+        const scopedContacts = campaignId
+          ? existingContacts.filter((c) => c.campaignId === campaignId)
+          : existingContacts.filter((c) => !c.campaignId)
         const existingEmails = new Set(
-          existingContacts.map((contact) => normalizeEmail(contact.email))
+          scopedContacts.map((contact) => normalizeEmail(contact.email))
         )
         const newContacts: Contact[] = []
         let duplicateCount = 0
@@ -134,6 +151,7 @@ export function useContacts() {
             status: 'pending' as ContactStatus,
             resendCount: 0,
             createdAt: Date.now(),
+            campaignId,
           }
           await addContact(contact)
           existingEmails.add(email)
@@ -165,6 +183,17 @@ export function useContacts() {
     }
   }, [])
 
+  const removeContactsByCampaign = useCallback(async (campaignId: string) => {
+    try {
+      await deleteContactsByCampaignId(campaignId)
+      setContacts((prev) => prev.filter((c) => c.campaignId !== campaignId))
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error('Unknown error')
+      setError(error)
+      throw error
+    }
+  }, [])
+
   const clearAllContacts = useCallback(async () => {
     try {
       await clearAll()
@@ -175,6 +204,7 @@ export function useContacts() {
       throw error
     }
   }, [])
+
   const getContactsByStatusFilter = useCallback(
     async (status: ContactStatus): Promise<Contact[]> => {
       try {
@@ -189,7 +219,11 @@ export function useContacts() {
   )
 
   const incrementResendCount = useCallback(
-    async (id: string): Promise<Contact> => {
+    async (
+      id: string,
+      rfc822MessageId?: string,
+      threadIndex?: string,
+    ): Promise<Contact> => {
       try {
         const contact = await getContact(id)
         if (!contact) throw new Error('Contact not found')
@@ -198,6 +232,8 @@ export function useContacts() {
           ...contact,
           resendCount: (contact.resendCount || 0) + 1,
           lastSentAt: Date.now(),
+          rfc822MessageId: rfc822MessageId || contact.rfc822MessageId,
+          threadIndex: threadIndex || contact.threadIndex,
         }
 
         await updateContact(updated)
@@ -222,6 +258,7 @@ export function useContacts() {
     updateContactStatus,
     bulkCreateContacts,
     removeContact,
+    removeContactsByCampaign,
     getContactsByStatusFilter,
     incrementResendCount,
     clearAllContacts,

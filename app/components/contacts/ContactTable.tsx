@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { Contact, ContactStatus } from '@/lib/types'
+import { Campaign, Contact, ContactStatus } from '@/lib/types'
 import {
   Table,
   TableBody,
@@ -16,30 +16,40 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Badge } from '@/components/ui/badge'
-import { MoreHorizontal, Trash2, RotateCcw, Search, Send, Mail } from 'lucide-react'
+import { MoreHorizontal, Trash2, RotateCcw, Search, Send, Mail, Bell } from 'lucide-react'
 import { format } from 'date-fns'
 
 interface ContactTableProps {
   contacts: Contact[]
+  campaigns?: Campaign[]
   onDelete: (id: string) => void
   onSend: (id: string) => void
   onResend: (id: string) => void
+  onRemind: (id: string) => void
   onViewReply: (id: string) => void
 }
 
 export function ContactTable({
   contacts,
+  campaigns = [],
   onDelete,
   onSend,
   onResend,
+  onRemind,
   onViewReply,
 }: ContactTableProps) {
   const [searchQuery, setSearchQuery] = useState('')
   const [sortBy, setSortBy] = useState<'name' | 'status' | 'date'>('date')
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc')
+
+  const campaignMap = useMemo(
+    () => Object.fromEntries(campaigns.map((c) => [c.id, c.name])),
+    [campaigns]
+  )
 
   const filteredAndSorted = useMemo(() => {
     let filtered = contacts
@@ -152,7 +162,14 @@ export function ContactTable({
             ) : (
               filteredAndSorted.map((contact) => (
                 <TableRow key={contact.id}>
-                  <TableCell className="font-medium">{contact.name}</TableCell>
+                  <TableCell className="font-medium">
+                    <div>{contact.name}</div>
+                    {contact.campaignId && campaignMap[contact.campaignId] && (
+                      <div className="text-xs text-muted-foreground mt-0.5">
+                        {campaignMap[contact.campaignId]}
+                      </div>
+                    )}
+                  </TableCell>
                   <TableCell className="font-mono text-sm">{contact.email}</TableCell>
                   <TableCell>{getStatusBadge(contact.status)}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">
@@ -160,30 +177,52 @@ export function ContactTable({
                       ? format(new Date(contact.lastSentAt), 'MMM d, yyyy')
                       : '—'}
                   </TableCell>
-                  <TableCell className="text-right flex items-center justify-end gap-2">
-                    {contact.status === 'replied' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => onViewReply(contact.id)}
-                        className="gap-2 cursor-pointer"
-                      >
-                        <Mail className="w-4 h-4" />
-                        View Reply
-                      </Button>
-                    )}
-                    {contact.status !== 'replied' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => (contact.status === 'pending' ? onSend(contact.id) : onResend(contact.id))}
-                        className="gap-2"
-                      >
-                        {contact.status === 'pending' ? <Send className="w-4 h-4" /> : <RotateCcw className="w-4 h-4" />}
-                        {contact.status === 'pending' ? 'Send' : 'Resend'}
-                      </Button>
-                    )}
-                    <div>
+                  <TableCell className="text-right">
+                    <div className="flex items-center justify-end gap-2">
+                      {contact.status === 'replied' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onViewReply(contact.id)}
+                          className="gap-1 cursor-pointer"
+                        >
+                          <Mail className="w-4 h-4" />
+                          View Reply
+                        </Button>
+                      )}
+                      {contact.status === 'pending' && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onSend(contact.id)}
+                          className="gap-1 cursor-pointer"
+                        >
+                          <Send className="w-4 h-4" />
+                          Send
+                        </Button>
+                      )}
+                      {(contact.status === 'sent' || contact.status === 'replied') && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => onResend(contact.id)}
+                          className="gap-1 cursor-pointer"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          Resend
+                        </Button>
+                      )}
+                      {(contact.status === 'sent' || contact.status === 'replied') && contact.threadId && (
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => onRemind(contact.id)}
+                          className="gap-1 cursor-pointer"
+                        >
+                          <Bell className="w-4 h-4" />
+                          Remind
+                        </Button>
+                      )}
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="sm" className="h-8 w-8 p-0">
@@ -193,7 +232,7 @@ export function ContactTable({
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem
                             onClick={() => onDelete(contact.id)}
-                            className="gap-2 text-destructive"
+                            className="gap-2 text-destructive cursor-pointer"
                           >
                             <Trash2 className="w-4 h-4" />
                             Delete

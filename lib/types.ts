@@ -1,15 +1,24 @@
 export type ContactStatus = 'pending' | 'sent' | 'replied'
 
+export interface Campaign {
+  id: string
+  name: string
+  createdAt: number
+}
+
 export interface Contact {
   id: string
   email: string
   name: string
   status: ContactStatus
-  messageId?: string
-  threadId?: string
+  messageId?: string       // Gmail internal message ID
+  threadId?: string        // Gmail internal thread ID
+  rfc822MessageId?: string // RFC 2822 Message-ID of last sent message (<CA+...@mailapp>)
+  threadIndex?: string     // Outlook Thread-Index of last sent message (base64)
   lastSentAt?: number
   resendCount: number
   createdAt: number
+  campaignId?: string
 }
 
 export interface EmailTemplate {
@@ -68,10 +77,21 @@ export interface SendEmailRequest {
   body: string
   bodyType?: 'html' | 'text'
   threadId?: string
+  // Threading headers — supply when replying so recipient clients group correctly
+  inReplyToMessageId?: string // RFC 2822 Message-ID of the message being replied to
+  referencesHeader?: string   // Space-separated chain of all Message-IDs in the thread
+  parentThreadIndex?: string  // Caller's stored Thread-Index for appending (Outlook)
+  threadTopic?: string        // Original conversation subject (Outlook Thread-Topic)
 }
 
 export interface SendEmailResponse {
   id: string
   threadId: string
   labelIds?: string[]
+}
+
+/** Extended result returned by GmailService.sendEmail — includes generated headers */
+export interface SendResult extends SendEmailResponse {
+  rfc822MessageId: string // The Message-ID we set in the raw email
+  threadIndex: string     // The Thread-Index we set (initial or appended)
 }
