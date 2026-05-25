@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useRef } from 'react'
-import { read, utils } from 'xlsx'
+import { read, utils, type WorkBook } from 'xlsx'
 import {
   Dialog,
   DialogContent,
@@ -52,6 +52,64 @@ function getFallbackName(email: string): string {
   return email.split('@')[0]?.trim() || email
 }
 
+function sanitizeHeaders(rawHeaders: unknown[]): string[] {
+  const seenHeaders = new Map<string, number>()
+
+  return rawHeaders.map((header, index) => {
+    const normalizedHeader = normalizeCell(header)
+    const baseHeader = normalizedHeader || `Column ${index + 1}`
+    const duplicateCount = seenHeaders.get(baseHeader) ?? 0
+
+    seenHeaders.set(baseHeader, duplicateCount + 1)
+
+    if (duplicateCount === 0) {
+      return baseHeader
+    }
+
+    return `${baseHeader} (${duplicateCount + 1})`
+  })
+}
+
+function parseSheetData(workbook: WorkBook, sheetName: string): ParsedData {
+  const worksheet = workbook.Sheets[sheetName]
+
+  if (!worksheet) {
+    throw new Error('Selected sheet was not found in the workbook')
+  }
+
+  const data = utils.sheet_to_json(worksheet, {
+    header: 1,
+    defval: '',
+    blankrows: false,
+  })
+
+  if (data.length < 2) {
+    throw new Error('Selected sheet must contain at least 2 rows (header + 1 data row)')
+  }
+
+  return {
+    columns: sanitizeHeaders(data[0] as unknown[]),
+    rows: data.slice(1),
+  }
+}
+
+function getSuggestedColumns(parsedData: ParsedData): {
+  emailColumn: string
+  nameColumn: string
+} {
+  const emailIdx = parsedData.columns.findIndex((header) =>
+    header.toLowerCase().includes('email')
+  )
+  const nameIdx = parsedData.columns.findIndex((header) =>
+    header.toLowerCase().includes('name')
+  )
+
+  return {
+    emailColumn: emailIdx >= 0 ? parsedData.columns[emailIdx] : '',
+    nameColumn: nameIdx >= 0 ? parsedData.columns[nameIdx] : AUTO_NAME_COLUMN,
+  }
+}
+
 function buildContacts(
   parsedData: ParsedData,
   emailColumn: string,
@@ -92,6 +150,9 @@ export function ImportDialog({
 }: ImportDialogProps) {
   const [step, setStep] = useState<'upload' | 'map' | 'preview'>('upload')
   const [file, setFile] = useState<File | null>(null)
+  const [workbook, setWorkbook] = useState<WorkBook | null>(null)
+  const [sheetNames, setSheetNames] = useState<string[]>([])
+  const [selectedSheet, setSelectedSheet] = useState<string>('')
   const [parsedData, setParsedData] = useState<ParsedData | null>(null)
   const [emailColumn, setEmailColumn] = useState<string>('')
   const [nameColumn, setNameColumn] = useState<string>('')
@@ -119,39 +180,47 @@ export function ImportDialog({
       }
 
       const arrayBuffer = await selectedFile.arrayBuffer()
-      const workbook = read(arrayBuffer, { type: 'array' })
-      const worksheet = workbook.Sheets[workbook.SheetNames[0]]
-      const data = utils.sheet_to_json(worksheet, {
-        header: 1,
-        defval: '',
-        blankrows: false,
-      })
+      const nextWorkbook = read(arrayBuffer, { type: 'array' })
+      const nextSheetNames = nextWorkbook.SheetNames
+      const initialSheet = nextSheetNames[0]
 
-      if (data.length < 2) {
-        setError('File must contain at least 2 rows (header + 1 data row)')
+      if (!initialSheet) {
+        setError('File does not contain any sheets')
         return
       }
 
-      const headers = data[0] as string[]
-      const rows = data.slice(1)
+      const nextParsedData = parseSheetData(nextWorkbook, initialSheet)
+      const suggestedColumns = getSuggestedColumns(nextParsedData)
 
-      setParsedData({ columns: headers, rows })
+      setWorkbook(nextWorkbook)
+      setSheetNames(nextSheetNames)
+      setSelectedSheet(initialSheet)
+      setParsedData(nextParsedData)
       setStep('map')
-
-      const emailIdx = headers.findIndex((h) =>
-        h?.toString().toLowerCase().includes('email')
-      )
-      const nameIdx = headers.findIndex((h) =>
-        h?.toString().toLowerCase().includes('name')
-      )
-      if (emailIdx >= 0) setEmailColumn(headers[emailIdx])
-      if (nameIdx >= 0) {
-        setNameColumn(headers[nameIdx])
-      } else {
-        setNameColumn(AUTO_NAME_COLUMN)
-      }
+      setEmailColumn(suggestedColumns.emailColumn)
+      setNameColumn(suggestedColumns.nameColumn)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to parse file')
+    }
+  }
+
+  const handleSheetChange = (sheetName: string) => {
+    if (!workbook) {
+      setError('No workbook loaded')
+      return
+    }
+
+    try {
+      const nextParsedData = parseSheetData(workbook, sheetName)
+      const suggestedColumns = getSuggestedColumns(nextParsedData)
+
+      setError(null)
+      setSelectedSheet(sheetName)
+      setParsedData(nextParsedData)
+      setEmailColumn(suggestedColumns.emailColumn)
+      setNameColumn(suggestedColumns.nameColumn)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to parse selected sheet')
     }
   }
 
@@ -186,6 +255,9 @@ export function ImportDialog({
       await onImport(contacts, campaignName.trim())
       onOpenChange(false)
       setFile(null)
+      setWorkbook(null)
+      setSheetNames([])
+      setSelectedSheet('')
       setParsedData(null)
       setStep('upload')
       setEmailColumn('')
@@ -274,6 +346,24 @@ export function ImportDialog({
 
         {step === 'map' && parsedData && (
           <div className="space-y-4">
+            {sheetNames.length > 1 && (
+              <div>
+                <label className="text-sm font-medium block mb-2">Sheet</label>
+                <Select value={selectedSheet} onValueChange={handleSheetChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select sheet" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sheetNames.map((sheetName) => (
+                      <SelectItem key={sheetName} value={sheetName}>
+                        {sheetName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <div>
               <label className="text-sm font-medium block mb-2">Email Column</label>
               <Select value={emailColumn} onValueChange={setEmailColumn}>
