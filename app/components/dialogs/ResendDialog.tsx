@@ -21,7 +21,7 @@ import {
 } from '@/components/ui/select'
 import { Button } from '@/components/ui/button'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
-import { AlertCircle, ChevronDown, Mail, RotateCcw } from 'lucide-react'
+import { AlertCircle, ChevronDown, Mail, Pin, RotateCcw } from 'lucide-react'
 
 export type ResendMode = 'resend' | 'remind'
 
@@ -32,6 +32,9 @@ interface ResendDialogProps {
   templates: EmailTemplate[]
   token: string | null
   mode?: ResendMode
+  /** Template used for the previous send — pre-selected when the dialog opens. */
+  defaultTemplateId?: string | null
+  onTemplateUsed?: (templateId: string) => void
   onResendSuccess: (contact: Contact, messageId: string, threadId: string, rfc822MessageId?: string, threadIndex?: string) => void
 }
 
@@ -42,6 +45,8 @@ export function ResendDialog({
   templates,
   token,
   mode = 'resend',
+  defaultTemplateId,
+  onTemplateUsed,
   onResendSuccess,
 }: ResendDialogProps) {
   const { refreshToken } = useToken()
@@ -97,7 +102,10 @@ export function ResendDialog({
 
   useEffect(() => {
     if (templates.length > 0 && !selectedTemplateId) {
-      setSelectedTemplateId(templates[0].id)
+      // The dialog is mounted fresh on every open, so this initial pick is also
+      // where the remembered template gets applied.
+      const preferred = templates.find((t) => t.id === defaultTemplateId) ?? templates[0]
+      setSelectedTemplateId(preferred.id)
     }
 
     if (isOpen && mode === 'remind' && contact?.threadId && gmail) {
@@ -140,7 +148,7 @@ export function ResendDialog({
         .catch(() => setError('Could not load original email thread.'))
         .finally(() => setIsLoadingOriginal(false))
     }
-  }, [templates, selectedTemplateId, isOpen, contact, gmail, mode])
+  }, [templates, selectedTemplateId, isOpen, contact, gmail, mode, defaultTemplateId])
 
   const handleSend = async () => {
     if (!contact || !selectedTemplateId || !token) {
@@ -208,6 +216,7 @@ export function ResendDialog({
         threadTopic: isRemind ? (originalEmail?.subject ?? subject) : subject,
       })
 
+      onTemplateUsed?.(template.id)
       onResendSuccess(contact, response.id, response.threadId, response.rfc822MessageId, response.threadIndex)
       onOpenChange(false)
     } catch (err) {
@@ -259,11 +268,22 @@ export function ResendDialog({
               <SelectContent>
                 {templates.map((template) => (
                   <SelectItem key={template.id} value={template.id}>
-                    {template.subject}
+                    <span className="flex items-center gap-1.5">
+                      {template.id === defaultTemplateId && (
+                        <Pin className="w-3 h-3 text-muted-foreground shrink-0" />
+                      )}
+                      {template.subject}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {templates.some((t) => t.id === defaultTemplateId) && (
+              <p className="text-xs text-muted-foreground mt-1">
+                <Pin className="w-3 h-3 inline mr-1" />
+                Template dùng lần trước đã được chọn sẵn — đổi lại nếu cần.
+              </p>
+            )}
           </div>
 
           {selectedTemplate && (

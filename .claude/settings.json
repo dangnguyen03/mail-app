@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs ls -la)",
+      "Bash(awk '{print $5, $9}')",
+      "Bash(sort -k2)",
+      "Bash(node -e \"for \\(const p of ['@radix-ui/react-dialog','@radix-ui/react-alert-dialog','react-remove-scroll']\\) { try { console.log\\(p, require\\('./node_modules/'+p+'/package.json'\\).version\\) } catch\\(e\\){ console.log\\(p,'MISSING'\\) } }\")"
+    ]
+  }
+}

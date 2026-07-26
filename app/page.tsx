@@ -15,6 +15,8 @@ import { ContactTable } from './components/contacts/ContactTable'
 import { useContacts } from './hooks/useContacts'
 import { useTemplates } from './hooks/useTemplates'
 import { useCampaigns } from './hooks/useCampaigns'
+import { useLastTemplate } from './hooks/useLastTemplate'
+import { useScrollLockPreserve } from './hooks/useScrollLockPreserve'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -49,7 +51,13 @@ export default function Page() {
   } = useContacts()
   const { templates, createTemplate, updateTemplateContent, removeTemplate } = useTemplates()
   const { campaigns, createCampaign, removeCampaign } = useCampaigns()
+  const { lastTemplateId, rememberTemplate } = useLastTemplate()
   const { toast } = useToast()
+
+  // Radix's scroll lock otherwise drops you back at the top of the page every
+  // time a dialog opens — very noticeable for Resend/Remind, which are reached
+  // by scrolling down the contact table.
+  useScrollLockPreserve()
 
   const [showTokenDialog, setShowTokenDialog] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
@@ -496,6 +504,8 @@ export default function Page() {
             campaigns={campaigns}
             templates={templates}
             token={token}
+            defaultTemplateId={lastTemplateId}
+            onTemplateUsed={rememberTemplate}
             onContactUpdate={handleContactUpdate}
           />
           {selectedContactForResend && (
@@ -509,6 +519,8 @@ export default function Page() {
               templates={templates}
               token={token}
               mode={resendMode}
+              defaultTemplateId={lastTemplateId}
+              onTemplateUsed={rememberTemplate}
               onResendSuccess={handleResendSuccess}
             />
           )}

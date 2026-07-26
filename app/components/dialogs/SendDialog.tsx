@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { Campaign, Contact, EmailTemplate } from '@/lib/types'
 import { GmailService } from '@/lib/gmail'
 import { useToken } from '@/app/components/provider/TokenProvider'
@@ -24,7 +24,7 @@ import { Slider } from '@/components/ui/slider'
 import { Progress } from '@/components/ui/progress'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { AlertCircle, CheckCircle2, AlertTriangle, MailCheck } from 'lucide-react'
+import { AlertCircle, CheckCircle2, AlertTriangle, MailCheck, Pin } from 'lucide-react'
 
 const ALL_CAMPAIGNS = '__all__'
 
@@ -35,6 +35,9 @@ interface SendDialogProps {
   campaigns: Campaign[]
   templates: EmailTemplate[]
   token: string | null
+  /** Template used for the previous send — pre-selected when the dialog opens. */
+  defaultTemplateId?: string | null
+  onTemplateUsed?: (templateId: string) => void
   onContactUpdate: (contactId: string, status: 'sent' | 'failed', messageId?: string, threadId?: string, rfc822MessageId?: string, threadIndex?: string) => void
 }
 
@@ -53,6 +56,8 @@ export function SendDialog({
   campaigns,
   templates,
   token,
+  defaultTemplateId,
+  onTemplateUsed,
   onContactUpdate,
 }: SendDialogProps) {
   const { refreshToken } = useToken()
@@ -65,11 +70,16 @@ export function SendDialog({
   const [progress, setProgress] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
+  // Re-apply the remembered template each time the dialog opens, but never while
+  // it's already open — that would clobber a selection the user just made.
+  const wasOpen = useRef(false)
   useEffect(() => {
-    if (templates.length > 0 && !selectedTemplateId) {
-      setSelectedTemplateId(templates[0].id)
+    if (isOpen && !wasOpen.current && templates.length > 0) {
+      const preferred = templates.find((t) => t.id === defaultTemplateId) ?? templates[0]
+      setSelectedTemplateId(preferred.id)
     }
-  }, [templates, selectedTemplateId])
+    wasOpen.current = isOpen
+  }, [isOpen, templates, defaultTemplateId])
 
   const allContactsDeduped = useMemo(() => {
     const seen = new Set<string>()
@@ -127,6 +137,10 @@ export function SendDialog({
       setError('No contacts to send to.')
       return
     }
+
+    // Pin this template now rather than after the loop: a run that partially
+    // fails still tells us which template the user is working with.
+    onTemplateUsed?.(template.id)
 
     setIsSending(true)
     setIsDone(false)
@@ -263,11 +277,22 @@ export function SendDialog({
                 <SelectContent>
                   {templates.map((template) => (
                     <SelectItem key={template.id} value={template.id}>
-                      {template.subject}
+                      <span className="flex items-center gap-1.5">
+                        {template.id === defaultTemplateId && (
+                          <Pin className="w-3 h-3 text-muted-foreground shrink-0" />
+                        )}
+                        {template.subject}
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {templates.some((t) => t.id === defaultTemplateId) && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  <Pin className="w-3 h-3 inline mr-1" />
+                  Template dùng lần trước đã được chọn sẵn — đổi lại nếu cần.
+                </p>
+              )}
             </div>
 
             <div>
