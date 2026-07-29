@@ -17,6 +17,7 @@ import { useTemplates } from './hooks/useTemplates'
 import { useCampaigns } from './hooks/useCampaigns'
 import { useLastTemplate } from './hooks/useLastTemplate'
 import { useScrollLockPreserve } from './hooks/useScrollLockPreserve'
+import { useScrollJumpDebug } from './hooks/useScrollJumpDebug' // TEMP: diagnostic
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -36,7 +37,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { LogOut, Plus, Upload, Send, Trash2, ChevronDown, FolderX } from 'lucide-react'
 import { useToast } from '@/hooks/use-toast'
-import { EmailTemplate } from '@/lib/types'
+import { ContactStatus, EmailTemplate } from '@/lib/types'
 
 export default function Page() {
   const { token, clearToken, isLoading: tokenLoading } = useToken()
@@ -58,6 +59,7 @@ export default function Page() {
   // time a dialog opens — very noticeable for Resend/Remind, which are reached
   // by scrolling down the contact table.
   useScrollLockPreserve()
+  useScrollJumpDebug() // TEMP: diagnostic
 
   const [showTokenDialog, setShowTokenDialog] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
@@ -230,7 +232,18 @@ export default function Page() {
     // Only update rfc822MessageId on a fresh resend (new thread).
     const newRfc822MessageId = resendMode === 'remind' ? undefined : rfc822MessageId
     await incrementResendCount(contact.id, newRfc822MessageId, threadIndex)
-    await updateContactStatus(contact.id, 'sent', messageId, threadId, newRfc822MessageId, threadIndex)
+
+    // A remind is a reply inside the *existing* thread, so it must not undo the
+    // fact that the recipient already replied. Forcing 'sent' here both lost that
+    // history (they reappeared under Not Replied) and dropped the row out of the
+    // Replied tab — which shortens the page, so the browser clamps the scroll
+    // offset and you land back at the top.
+    // A resend is a genuinely new thread, so awaiting a fresh reply is correct.
+    const existing = contacts.find((c) => c.id === contact.id)
+    const nextStatus: ContactStatus =
+      resendMode === 'remind' && existing?.status === 'replied' ? 'replied' : 'sent'
+
+    await updateContactStatus(contact.id, nextStatus, messageId, threadId, newRfc822MessageId, threadIndex)
     toast({ title: resendMode === 'remind' ? 'Reminder sent successfully' : 'Email resent successfully' })
   }
 
@@ -241,6 +254,7 @@ export default function Page() {
   }, [tokenLoading, token])
 
   if (tokenLoading) {
+    console.warn('[jump] RENDER: spinner branch — dashboard is unmounted') // TEMP: diagnostic
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <div className="text-center space-y-4">
@@ -252,6 +266,7 @@ export default function Page() {
   }
 
   if (!token) {
+    console.warn('[jump] RENDER: sign-in branch — dashboard is unmounted') // TEMP: diagnostic
     return (
       <>
         <TokenDialog isOpen={showTokenDialog} onOpenChange={setShowTokenDialog} />

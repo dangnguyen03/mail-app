@@ -4,7 +4,12 @@
       "Bash(xargs ls -la)",
       "Bash(awk '{print $5, $9}')",
       "Bash(sort -k2)",
-      "Bash(node -e \"for \\(const p of ['@radix-ui/react-dialog','@radix-ui/react-alert-dialog','react-remove-scroll']\\) { try { console.log\\(p, require\\('./node_modules/'+p+'/package.json'\\).version\\) } catch\\(e\\){ console.log\\(p,'MISSING'\\) } }\")"
+      "Bash(node -e \"for \\(const p of ['@radix-ui/react-dialog','@radix-ui/react-alert-dialog','react-remove-scroll']\\) { try { console.log\\(p, require\\('./node_modules/'+p+'/package.json'\\).version\\) } catch\\(e\\){ console.log\\(p,'MISSING'\\) } }\")",
+      "Bash(ls -d \"/Applications/Google Chrome.app\" \"/Applications/Chromium.app\" \"/Applications/Microsoft Edge.app\" 2>/dev/null; which chromium chrome google-chrome 2>/dev/null; echo \"---node---\"; node -v)",
+      "Read(//Applications/Google Chrome.app/**)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --window-size=800,600 --virtual-time-budget=5000 --dump-dom file:///private/tmp/claude-501/-Users-lap15149-Workspace-dangnt-project-mailv3/b9ba3639-5201-4be3-9b9e-05563e399591/scratchpad/scrollrepro.html)",
+      "Bash(sed -i '' 's/requestAnimationFrame\\(/setTimeout\\(/g' /private/tmp/claude-501/-Users-lap15149-Workspace-dangnt-project-mailv3/b9ba3639-5201-4be3-9b9e-05563e399591/scratchpad/scrollrepro.html)",
+      "Bash('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' --headless=new --disable-gpu --window-size=800,600 --virtual-time-budget=8000 --dump-dom file:///private/tmp/claude-501/-Users-lap15149-Workspace-dangnt-project-mailv3/b9ba3639-5201-4be3-9b9e-05563e399591/scratchpad/scrollrepro.html)"
     ]
   }
 }

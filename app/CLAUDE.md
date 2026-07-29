@@ -30,7 +30,14 @@ only the dialog title differs. `handleRemind` opens it with `mode='remind'`.
 creating a duplicate.
 
 `handleResendSuccess` passes `rfc822MessageId: undefined` when `resendMode === 'remind'` — intentional,
-see the remind rule in ../lib/CLAUDE.md.
+see the remind rule in ../lib/CLAUDE.md. It also **keeps `status: 'replied'` when reminding an
+already-replied contact** instead of forcing `'sent'`. Forcing it lost the reply history and dropped
+the row out of the Replied tab; a shorter page makes the browser clamp the scroll offset, which read
+as "the page jumped to the top". A resend is a new thread, so `'sent'` is still correct there.
+
+**Any change that shortens the contact list moves the viewport** — the browser clamps the scroll
+offset to the new maximum. Reply polling marking someone `'replied'` while you sit on the Not Replied
+tab does the same thing. Watch for it when touching filters or status transitions.
 
 ## hooks/
 
