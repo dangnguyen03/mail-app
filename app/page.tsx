@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useToken } from './components/provider/TokenProvider'
 import { TokenDialog } from './components/dialogs/TokenDialog'
 import { ImportDialog } from './components/dialogs/ImportDialog'
@@ -16,8 +16,7 @@ import { useContacts } from './hooks/useContacts'
 import { useTemplates } from './hooks/useTemplates'
 import { useCampaigns } from './hooks/useCampaigns'
 import { useLastTemplate } from './hooks/useLastTemplate'
-import { useScrollLockPreserve } from './hooks/useScrollLockPreserve'
-import { useScrollJumpDebug } from './hooks/useScrollJumpDebug' // TEMP: diagnostic
+import { useScrollRestore } from './hooks/useScrollRestore'
 import { Button } from '@/components/ui/button'
 import {
   AlertDialog,
@@ -55,11 +54,10 @@ export default function Page() {
   const { lastTemplateId, rememberTemplate } = useLastTemplate()
   const { toast } = useToast()
 
-  // Radix's scroll lock otherwise drops you back at the top of the page every
-  // time a dialog opens — very noticeable for Resend/Remind, which are reached
-  // by scrolling down the contact table.
-  useScrollLockPreserve()
-  useScrollJumpDebug() // TEMP: diagnostic
+  // Safety net: if anything shortens the page while a dialog is open, put the
+  // scroll offset back once it closes. See the hook for why this is needed on top
+  // of the render-gate fix below.
+  useScrollRestore()
 
   const [showTokenDialog, setShowTokenDialog] = useState(false)
   const [showImportDialog, setShowImportDialog] = useState(false)
@@ -73,6 +71,10 @@ export default function Page() {
   const [activeTab, setActiveTab] = useState<'all' | 'replied' | 'not-replied'>('all')
   const [activeCampaignId, setActiveCampaignId] = useState<string | null>(null)
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | null>(null)
+
+  // Set once the dashboard has been shown, so a transient loss of `token` can't
+  // swap it out for the sign-in screen. See the render gates below.
+  const hasRenderedDashboard = useRef(false)
 
   // AlertDialog states
   const [deleteContactId, setDeleteContactId] = useState<string | null>(null)
@@ -253,8 +255,17 @@ export default function Page() {
     }
   }, [tokenLoading, token])
 
-  if (tokenLoading) {
-    console.warn('[jump] RENDER: spinner branch — dashboard is unmounted') // TEMP: diagnostic
+  // Once the dashboard has rendered, keep it mounted even if `token` briefly goes
+  // empty — a NextAuth session refetch or a failed token refresh can do that at
+  // any moment, and `refreshToken()` at the start of every send makes it likely
+  // mid-remind. Swapping the whole dashboard for the sign-in screen collapsed the
+  // page to a single viewport, so the browser clamped the scroll offset to 0 and
+  // it read as "the app jumped back to home" — and it tore down the open dialog
+  // with no exit animation. The TokenDialog effect above still prompts re-auth.
+  if (token) hasRenderedDashboard.current = true
+  const keepDashboard = hasRenderedDashboard.current
+
+  if (tokenLoading && !keepDashboard) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-background">
         <div className="text-center space-y-4">
@@ -265,8 +276,7 @@ export default function Page() {
     )
   }
 
-  if (!token) {
-    console.warn('[jump] RENDER: sign-in branch — dashboard is unmounted') // TEMP: diagnostic
+  if (!token && !keepDashboard) {
     return (
       <>
         <TokenDialog isOpen={showTokenDialog} onOpenChange={setShowTokenDialog} />
@@ -325,7 +335,7 @@ export default function Page() {
         </div>
       </header>
 
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
         <div className="grid gap-8 lg:grid-cols-3">
           <div className="lg:col-span-2 space-y-8">
             <DashboardStats contacts={contacts} />
@@ -399,90 +409,6 @@ export default function Page() {
                 </div>
               </div>
             )}
-
-            <div className="space-y-6">
-              {/* Campaign filter */}
-              {campaigns.length > 0 && (
-                <div className="flex flex-wrap gap-2 pb-2">
-                  <button
-                    onClick={() => setActiveCampaignId(null)}
-                    className={`px-3 py-1 rounded-full text-sm font-medium border transition ${
-                      activeCampaignId === null
-                        ? 'bg-primary text-primary-foreground border-primary'
-                        : 'border-border text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    All campaigns
-                  </button>
-                  {campaigns.map((campaign) => {
-                    const count = contacts.filter((c) => c.campaignId === campaign.id).length
-                    return (
-                      <div key={campaign.id} className="flex items-center gap-1">
-                        <button
-                          onClick={() => setActiveCampaignId(campaign.id)}
-                          className={`px-3 py-1 rounded-full text-sm font-medium border transition ${
-                            activeCampaignId === campaign.id
-                              ? 'bg-primary text-primary-foreground border-primary'
-                              : 'border-border text-muted-foreground hover:text-foreground'
-                          }`}
-                        >
-                          {campaign.name} ({count})
-                        </button>
-                        <button
-                          onClick={() => handleDeleteCampaign(campaign.id)}
-                          className="text-muted-foreground hover:text-destructive transition"
-                          title={`Delete campaign "${campaign.name}"`}
-                        >
-                          <FolderX className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
-
-              {/* Status tabs */}
-              <div className="border-b">
-                <div className="flex gap-4 overflow-x-auto">
-                  {(['all', 'replied', 'not-replied'] as const).map((tab) => {
-                    const base = activeCampaignId
-                      ? contacts.filter((c) => c.campaignId === activeCampaignId)
-                      : contacts
-                    const count =
-                      tab === 'all'
-                        ? base.length
-                        : tab === 'replied'
-                        ? base.filter((c) => c.status === 'replied').length
-                        : base.filter((c) => c.status === 'sent').length
-                    const label =
-                      tab === 'all' ? 'All' : tab === 'replied' ? 'Replied' : 'Not Replied'
-                    return (
-                      <button
-                        key={tab}
-                        onClick={() => setActiveTab(tab)}
-                        className={`pb-2 px-1 font-medium text-sm border-b-2 transition whitespace-nowrap ${
-                          activeTab === tab
-                            ? 'border-primary text-primary'
-                            : 'border-transparent text-muted-foreground hover:text-foreground'
-                        }`}
-                      >
-                        {label} ({count})
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <ContactTable
-                contacts={filteredContacts}
-                campaigns={campaigns}
-                onDelete={handleDelete}
-                onSend={handleSend}
-                onResend={handleResend}
-                onRemind={handleRemind}
-                onViewReply={handleViewReply}
-              />
-            </div>
           </div>
 
           <div className="space-y-6">
@@ -492,6 +418,92 @@ export default function Page() {
               hasTemplates={templates.length > 0}
             />
           </div>
+        </div>
+
+        {/* Full width. Nested in the 2/3 grid column above, the contact table
+            was squeezed to two thirds of the page by Getting Started. */}
+        <div className="space-y-6">
+          {/* Campaign filter */}
+          {campaigns.length > 0 && (
+            <div className="flex flex-wrap gap-2 pb-2">
+              <button
+                onClick={() => setActiveCampaignId(null)}
+                className={`px-3 py-1 rounded-full text-sm font-medium border transition ${
+                  activeCampaignId === null
+                    ? 'bg-primary text-primary-foreground border-primary'
+                    : 'border-border text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                All campaigns
+              </button>
+              {campaigns.map((campaign) => {
+                const count = contacts.filter((c) => c.campaignId === campaign.id).length
+                return (
+                  <div key={campaign.id} className="flex items-center gap-1">
+                    <button
+                      onClick={() => setActiveCampaignId(campaign.id)}
+                      className={`px-3 py-1 rounded-full text-sm font-medium border transition ${
+                        activeCampaignId === campaign.id
+                          ? 'bg-primary text-primary-foreground border-primary'
+                          : 'border-border text-muted-foreground hover:text-foreground'
+                      }`}
+                    >
+                      {campaign.name} ({count})
+                    </button>
+                    <button
+                      onClick={() => handleDeleteCampaign(campaign.id)}
+                      className="text-muted-foreground hover:text-destructive transition"
+                      title={`Delete campaign "${campaign.name}"`}
+                    >
+                      <FolderX className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+
+          {/* Status tabs */}
+          <div className="border-b">
+            <div className="flex gap-4 overflow-x-auto">
+              {(['all', 'replied', 'not-replied'] as const).map((tab) => {
+                const base = activeCampaignId
+                  ? contacts.filter((c) => c.campaignId === activeCampaignId)
+                  : contacts
+                const count =
+                  tab === 'all'
+                    ? base.length
+                    : tab === 'replied'
+                    ? base.filter((c) => c.status === 'replied').length
+                    : base.filter((c) => c.status === 'sent').length
+                const label =
+                  tab === 'all' ? 'All' : tab === 'replied' ? 'Replied' : 'Not Replied'
+                return (
+                  <button
+                    key={tab}
+                    onClick={() => setActiveTab(tab)}
+                    className={`pb-2 px-1 font-medium text-sm border-b-2 transition whitespace-nowrap ${
+                      activeTab === tab
+                        ? 'border-primary text-primary'
+                        : 'border-transparent text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    {label} ({count})
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <ContactTable
+            contacts={filteredContacts}
+            campaigns={campaigns}
+            onDelete={handleDelete}
+            onSend={handleSend}
+            onResend={handleResend}
+            onRemind={handleRemind}
+            onViewReply={handleViewReply}
+          />
         </div>
       </main>
 
@@ -510,9 +522,10 @@ export default function Page() {
         onDelete={editingTemplate ? handleDeleteTemplate : undefined}
       />
 
-      {token && (
-        <>
-          <SendDialog
+      {/* Not gated on `token`: all three accept a null token, and gating them
+          ripped an open dialog out of the tree the moment the token blinked. */}
+      <>
+        <SendDialog
             isOpen={showSendDialog}
             onOpenChange={setShowSendDialog}
             contacts={contacts}
@@ -547,8 +560,7 @@ export default function Page() {
               token={token}
             />
           )}
-        </>
-      )}
+      </>
 
       {/* ── AlertDialog: delete 1 contact ── */}
       <AlertDialog open={!!deleteContactId} onOpenChange={(open) => !open && setDeleteContactId(null)}>

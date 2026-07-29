@@ -7,6 +7,12 @@ Data models and Gmail behavior live in [../lib/CLAUDE.md](../lib/CLAUDE.md).
 
 Owns **all** cross-component state; children are presentational and take props + callbacks.
 
+Layout: `<main>` holds two stacked sections. A `lg:grid-cols-3` grid on top — stats / polling /
+action buttons / template chips in a `lg:col-span-2` column, `GettingStarted` in the remaining third —
+then the contact list (campaign filter, status tabs, `ContactTable`) **below the grid at full container
+width**. The list used to live inside the 2/3 column, which cost it a third of the page (800px instead
+of 1216px at a 1440px viewport); keep it outside the grid.
+
 State groups:
 - dialog visibility: `showTokenDialog`, `showImportDialog`, `showTemplateDialog`, `showSendDialog`,
   `showResendDialog`, `showReplyPreviewDialog`
@@ -14,8 +20,23 @@ State groups:
 - filters: `activeTab` (`'all' | 'replied' | 'not-replied'`), `activeCampaignId`
 - confirm-dialogs: `deleteContactId`, `showClearAllConfirm`, `deleteCampaignId`
 
-Render gates, in order: `tokenLoading` → spinner; `!token` → sign-in screen + TokenDialog;
-otherwise the dashboard. Send/Resend/ReplyPreview dialogs render only inside `{token && ...}`.
+Render gates: `tokenLoading` → spinner, `!token` → sign-in screen + TokenDialog — but **both are
+guarded by `hasRenderedDashboard`, a ref set the first time a token exists.** Do not remove that
+guard. `token` comes from `useSession()` and can blink empty at any moment (a session refetch, a
+failed refresh); `refreshToken()` runs at the start of every send, which made it likely mid-remind.
+When it blinked, the dashboard was replaced by the sign-in screen, the document collapsed from
+~1111px to one viewport, and the browser clamped the scroll offset to 0 — measured, not guessed:
+
+```
+at bottom     y=398 docH=1111
+token null    y=0   docH=713   <- dashboard unmounted
+token back    y=0   docH=1111  <- tall again, but stuck at the top
+```
+
+That read to users as "the app reloaded and jumped home", and because the dialogs were also gated on
+`{token && ...}`, an open dialog was ripped out of the tree with no exit animation. The dialogs are
+now ungated — all three accept `token: string | null` — and the TokenDialog effect still prompts
+re-auth. Sign-out is unaffected because `signOut()` navigates, which resets the ref.
 
 `page.tsx` calls `toast()` on nearly every action, but `layout.tsx` never mounts `<Toaster />` — none
 of those toasts are visible today. Mount `<Toaster />` from `@/components/ui/toaster` to turn them on.
@@ -50,6 +71,7 @@ after a write.
 | `useContacts` | `bulkCreateContacts` dedupes **within a campaign scope** (`campaignId`, or the no-campaign bucket) and validates emails; returns `{created, duplicateCount, invalidCount}`. Missing names fall back to the local part of the address. `updateContactStatus` and `incrementResendCount` merge with `\|\|`, so passing `undefined` preserves the stored value. |
 | `useTemplates` | `interpolateTemplate` and `getLatestTemplate` exist but nothing calls them — dialogs do the `{{name}}` replace inline. |
 | `useCampaigns` | thin: create / list / delete. |
+| `useScrollRestore` | Safety net for the scroll jump described under `page.tsx`. Watches `body[data-scroll-locked]`, snapshots the offset when a Radix overlay locks, and reapplies it across animation frames (800ms budget) once the lock clears — retrying matters because the page may still be too short to hold the offset at the moment it unlocks. Stops as soon as the offset sticks, so it can't fight a deliberate scroll. |
 | `useLastTemplate` | localStorage (`mailv3:lastTemplateId`), **not** IndexedDB — it's a UI preference. Returns `{lastTemplateId, rememberTemplate}`. Read after mount to avoid a hydration mismatch. A deleted template needs no cleanup: consumers fall back to `templates[0]` when the id doesn't resolve. |
 | `useScrollLockPreserve` | not a data hook; see below. |
 | `useReplyTracking` | not a data hook; see below. |
